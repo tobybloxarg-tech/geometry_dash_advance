@@ -24,4 +24,11 @@ int ed_put(EditorLevel *level, unsigned x, unsigned y, unsigned kind);
 int ed_get(const EditorLevel *level, unsigned x, unsigned y);
 void ed_encode(const EditorLevel *level, uint8_t out[ED_SAVE_BYTES]);
 int ed_decode(EditorLevel *level, const uint8_t in[ED_SAVE_BYTES]);
+/* Two independently checked banks per slot, within the 32 KiB SRAM window. */
+#define ED_SLOT_COUNT 6
+#define ED_BANK_BYTES (8 + ED_SAVE_BYTES + 4)
+enum { ED_BANK_EMPTY, ED_BANK_VALID, ED_BANK_UNKNOWN };
+int ed_bank_read(const uint8_t *bank, EditorLevel *level, uint32_t *sequence);
+void ed_bank_encode(uint8_t *bank, const EditorLevel *level, uint32_t sequence);
+int ed_choose_bank(const uint8_t *a, const uint8_t *b, int *writable);
 #endif
