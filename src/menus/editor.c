@@ -164,7 +164,7 @@ static void draw(unsigned x,unsigned y,unsigned left,unsigned top,unsigned selec
         text(0,128,"ARRIBA ABAJO ELEGIR"); text(0,136,"IZQ DER CAMBIAR B VOLVER");
         text(0,152,status); return;
     }
-    posprintf(line,"EDITOR X%02d Y%d",x+1,y+1); text(0,0,line);
+    posprintf(line,"EDITOR X%02d Y%d L/R TIPO",x+1,y+1); text(0,0,line);
     for(unsigned r=0;r<VIEW_H;r++) for(unsigned c=0;c<VIEW_W;c++) {
         metatile_at(c*2,2+r*2,(unsigned)ed_get(&editor_level,left+c,top+r));
         sprite_at(c*2,2+r*2,(unsigned)ed_sprite_get(&editor_level,left+c,top+r));
@@ -178,11 +178,13 @@ static void draw(unsigned x,unsigned y,unsigned left,unsigned top,unsigned selec
         else sprite_at(i*3,16,start+i-TERRAIN_BRUSH_COUNT+1);
     }
     outline((selected-start)*3,16);
-    text(0,144,"L/R TIPO A PONER B BORRAR"); text(0,152,status);
+    text(0,144,"A/B EDITAR A+B AJUSTES"); text(0,152,status);
 }
 void editor_loop(void) {
     unsigned x=0,y=0,left=0,top=0,selected=0;
     int screen=ED_SCREEN_EDIT; const char *status="";
+    EditorButtons buttons={0};
+    unsigned ax=0,ay=0,aselected=0,bx=0,by=0,bselected=0;
     screen_list=1; screen_detail=0; list_cursor=detail_cursor=0; active_slot=-1; dirty=legacy_copy=0;
     refresh_slots();
     REG_DISPCNT=DCNT_MODE0 | DCNT_BG0 | DCNT_BG1 | DCNT_BG2 | DCNT_BG3;
@@ -233,7 +235,15 @@ void editor_loop(void) {
     VBlankIntrWait(); draw(x,y,left,top,selected,screen,status);
     while(1) {
         int changed=0;
+        unsigned down, hit, edit_buttons;
         key_poll();
+        down=(key_is_down(KEY_A)?ED_INPUT_A:0)|(key_is_down(KEY_B)?ED_INPUT_B:0);
+        hit=(key_hit(KEY_A)?ED_INPUT_A:0)|(key_hit(KEY_B)?ED_INPUT_B:0);
+        /* SELECT wins over grid actions; START commits a pending edit before
+         * saving. Never recognize a chord in list/detail/menu/settings. */
+        edit_buttons=ed_edit_buttons_step(&buttons,down,hit,
+            !screen_list && !screen_detail && screen==ED_SCREEN_EDIT && !key_hit(KEY_SELECT),
+            key_hit(KEY_START));
         if(screen_list) {
             int old=list_cursor;
             if(key_hit(KEY_UP)) { do { list_cursor=(list_cursor+7)%8; }
@@ -273,7 +283,7 @@ void editor_loop(void) {
                 changed=1;
             }
         } else if(screen==ED_SCREEN_SETTINGS) {
-            if(key_hit(KEY_B)) { screen=ED_SCREEN_MENU; status=""; changed=1; }
+            if(key_hit(KEY_B) && !buttons.blocked) { screen=ED_SCREEN_MENU; status=""; changed=1; }
             else {
                 EditorSettings before=editor_level.settings;
                 if(key_hit(KEY_UP)) { settings_cursor=(settings_cursor+3)%4; changed=1; }
@@ -296,20 +306,26 @@ void editor_loop(void) {
                 status=dirty?"CAMBIOS DESCARTADOS":""; changed=1; }
         } else {
             if(key_hit(KEY_SELECT)) { screen=ED_SCREEN_MENU; changed=1; }
-            else {
+            else if(edit_buttons & ED_BUTTON_CHORD) {
+                screen=ED_SCREEN_SETTINGS; settings_cursor=0; status=""; changed=1;
+            } else {
                 if(key_hit(KEY_LEFT)&&x>0) { x--; changed=1; }
                 if(key_hit(KEY_RIGHT)&&x+1<ED_WIDTH) { x++; changed=1; }
                 if(key_hit(KEY_UP)&&y>0) { y--; changed=1; }
                 if(key_hit(KEY_DOWN)&&y+1<ED_HEIGHT) { y++; changed=1; }
                 if(key_hit(KEY_L)) { selected=(selected+BRUSH_COUNT-1)%BRUSH_COUNT; changed=1; }
                 if(key_hit(KEY_R)) { selected=(selected+1)%BRUSH_COUNT; changed=1; }
-                if(key_hit(KEY_A)) {
-                    if(selected<TERRAIN_BRUSH_COUNT) ed_put(&editor_level,x,y,brushes[selected]);
+                /* Remember the target at the press, not after the debounce
+                 * delay: the cursor/brush may move during the window. */
+                if(hit & ED_INPUT_A) { ax=x; ay=y; aselected=selected; }
+                if(hit & ED_INPUT_B) { bx=x; by=y; bselected=selected; }
+                if(edit_buttons & ED_INPUT_A) {
+                    if(aselected<TERRAIN_BRUSH_COUNT) ed_put(&editor_level,ax,ay,brushes[aselected]);
                     else {
-                        int old=ed_sprite_get(&editor_level,x,y);
-                        ed_sprite_put(&editor_level,x,y,selected-TERRAIN_BRUSH_COUNT+1);
+                        int old=ed_sprite_get(&editor_level,ax,ay);
+                        ed_sprite_put(&editor_level,ax,ay,aselected-TERRAIN_BRUSH_COUNT+1);
                         if(!ed_can_encode(&editor_level)) {
-                            ed_sprite_put(&editor_level,x,y,(unsigned)old);
+                            ed_sprite_put(&editor_level,ax,ay,(unsigned)old);
                             status="MAXIMO 128 OBJETOS"; changed=1;
                             goto placement_done;
                         }
@@ -317,9 +333,9 @@ void editor_loop(void) {
                     dirty=1; status="SIN GUARDAR"; changed=1;
 placement_done: ;
                 }
-                if(key_hit(KEY_B)) {
-                    if(selected<TERRAIN_BRUSH_COUNT) ed_put(&editor_level,x,y,ED_EMPTY);
-                    else ed_sprite_put(&editor_level,x,y,ED_SPR_EMPTY);
+                if(edit_buttons & ED_INPUT_B) {
+                    if(bselected<TERRAIN_BRUSH_COUNT) ed_put(&editor_level,bx,by,ED_EMPTY);
+                    else ed_sprite_put(&editor_level,bx,by,ED_SPR_EMPTY);
                     dirty=1; status="SIN GUARDAR"; changed=1;
                 }
                 if(key_hit(KEY_START)) {
