@@ -15,6 +15,15 @@
 #include "math.h"
 #include "editor_play.h"
 
+/* Stable editor song IDs resolve through symbolic MOD names at build time. */
+#define EDITOR_SONG_ID(name, label) MOD_##name,
+static const u16 editor_song_ids[] = { ED_SONG_LIST(EDITOR_SONG_ID) };
+#undef EDITOR_SONG_ID
+/* Guard against drift if engine player enums ever change. */
+typedef char editor_mode_values_match[(ED_MODE_CUBE == GAMEMODE_CUBE && ED_MODE_SHIP == GAMEMODE_SHIP && ED_MODE_BALL == GAMEMODE_BALL && ED_MODE_UFO == GAMEMODE_UFO && ED_MODE_WAVE == GAMEMODE_WAVE && ED_MODE_COUNT == GAMEMODE_COUNT) ? 1 : -1];
+typedef char editor_speed_values_match[(ED_SPEED_X05 == SPEED_X05 && ED_SPEED_X1 == SPEED_X1 && ED_SPEED_X2 == SPEED_X2 && ED_SPEED_X3 == SPEED_X3 && ED_SPEED_X4 == SPEED_X4 && ED_SPEED_COUNT == SPEED_COUNT) ? 1 : -1];
+typedef char editor_song_count_matches[(sizeof(editor_song_ids) / sizeof(editor_song_ids[0]) == ED_SONG_COUNT) ? 1 : -1];
+
 // RLE variables
 u16 value[LEVEL_LAYERS];
 s32 length[LEVEL_LAYERS];
@@ -400,19 +409,19 @@ void set_initial_color(COLOR bg_color, COLOR ground_color, COLOR col1_color, COL
 }
 
 void reset_variables() {
-    /* Editor attempts always start as a clean cube, even after portals or
-     * a previous stock run. Restore the already-selected spawn position. */
+    /* Editor attempts start clean, including after a portal or stock run.
+     * Restore the already-selected spawn position and configured mode. */
     if (ed_play_active()) {
         s32 spawn_y = player_1.player_y;
         memset(&player_1, 0, sizeof player_1);
         player_1.player_y = spawn_y;
-        player_1.gamemode = GAMEMODE_CUBE;
+        player_1.gamemode = ed_play_config().mode;
     }
     player_1.player_x = -0x80000;  
     player_1.relative_player_x = 0;
     player_1.player_y_speed = 0;
     player_1.on_slope = FALSE;
-    player_1.player_size = SIZE_BIG;
+    player_1.player_size = ed_play_active() && ed_play_config().mini ? SIZE_MINI : SIZE_BIG;
     player_1.gravity_dir = GRAVITY_DOWN;
     player_1.dashing = FALSE;
     player_1.dashing_rot = 0;
@@ -557,6 +566,16 @@ void load_level(u32 level_ID) {
     curr_level_height = properties_pointer[LEVEL_HEIGHT_INDEX];
     curr_level_width = properties_pointer[LEVEL_WIDTH_INDEX];
     loaded_song_id = properties_pointer[LEVEL_SONG_INDEX];
+    if (ed_play_active()) {
+        /* Resolve stable editor IDs independently of sound-test ordering. */
+        EditorPlayConfig config = ed_play_config();
+        player_1.gamemode = config.mode;
+        speed_id = config.speed;
+        loaded_song_id = editor_song_ids[config.song];
+        /* set_target_y_scroll reads curr_player and dual, not player_1. */
+        curr_player.gamemode = player_1.gamemode;
+        dual = DUAL_OFF;
+    }
     u32 background_type = properties_pointer[LEVEL_BACKGROUND_TYPE];
     u32 ground_type = properties_pointer[LEVEL_GROUND_TYPE];
 

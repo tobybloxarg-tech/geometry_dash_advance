@@ -11,6 +11,19 @@ static int active, error_code;
 /* Five halfwords per object and one complete sentinel halfword. */
 static ED_EWRAM uint16_t sprite_stream[ED_PLAY_MAX_SPRITES * ED_PLAY_RECORD_WORDS + 1];
 static unsigned sprite_words;
+static EditorPlayConfig pending_config = { 0, 1, 0, 0 };
+static EditorPlayConfig play_config = { 0, 1, 0, 0 };
+
+int ed_play_configure(unsigned mode, unsigned speed, unsigned mini, unsigned song) {
+    if (active || mode >= ED_PLAY_MODE_COUNT || speed >= ED_PLAY_SPEED_COUNT ||
+        mini > 1 || song >= ED_PLAY_SONG_COUNT) return 0;
+    pending_config.mode = (uint8_t)mode;
+    pending_config.speed = (uint8_t)speed;
+    pending_config.mini = (uint8_t)mini;
+    pending_config.song = (uint8_t)song;
+    return 1;
+}
+EditorPlayConfig ed_play_config(void) { return active ? play_config : pending_config; }
 
 int ed_play_prepare(const EditorLevel *level) {
     unsigned i, x, y, count = 0, last_x = 0, n = 0;
@@ -26,6 +39,7 @@ int ed_play_prepare(const EditorLevel *level) {
         }
     }
     memcpy(&play_level, level, sizeof play_level);
+    play_config = pending_config;
     /* Exporter sorts by X then Y. Its Y is a Tiled tile object's bottom
      * edge, so add one cell to match the editor's top-left anchor. */
     for (x = 0; x < ED_WIDTH; ++x) for (y = 0; y < ED_HEIGHT; ++y) {
