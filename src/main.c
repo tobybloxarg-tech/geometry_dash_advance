@@ -10,6 +10,7 @@
 #include "title_screen.h"
 #include "sound_test.h"
 #include "icon_kit.h"
+#include "editor.h"
 #include "math.h"
 
 void game_loop();
@@ -258,6 +259,10 @@ void main_loop() {
                 sound_test_loop();
                 break;
         
+            case STATE_EDITOR:
+                editor_loop();
+                break;
+
             case STATE_PLAYING:
                 game_loop();
                 break;
