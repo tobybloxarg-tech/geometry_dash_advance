@@ -13,7 +13,16 @@ enum { ED_EMPTY, ED_BLOCK, ED_SPIKE, ED_DARK, ED_CHECK, ED_SLAB_UP,
        ED_MEDIUM_UP, ED_MEDIUM_DOWN, ED_KIND_COUNT };
 /* Index is a stable editor symbol; result is an actual metatiles[] index. */
 extern const uint16_t ed_metatile[ED_KIND_COUNT];
-typedef struct { uint8_t cells[ED_CELLS]; } EditorLevel;
+/* Sprite layer is independent of terrain; one sprite per 16x16 anchor cell. */
+enum { ED_SPR_EMPTY, ED_SPR_YELLOW_ORB, ED_SPR_BLUE_ORB, ED_SPR_PINK_ORB,
+       ED_SPR_GREEN_ORB, ED_SPR_BLACK_ORB, ED_SPR_RED_ORB,
+       ED_SPR_SHIP, ED_SPR_CUBE, ED_SPR_BALL, ED_SPR_UFO, ED_SPR_WAVE,
+       ED_SPR_GRAVITY_BLUE, ED_SPR_GRAVITY_YELLOW, ED_SPR_MINI, ED_SPR_BIG,
+       ED_SPR_COUNT };
+extern const uint16_t ed_sprite_type[ED_SPR_COUNT];
+typedef struct { uint8_t cells[ED_CELLS]; uint8_t sprites[ED_CELLS]; } EditorLevel;
+int ed_sprite_put(EditorLevel *level, unsigned x, unsigned y, unsigned kind);
+int ed_sprite_get(const EditorLevel *level, unsigned x, unsigned y);
 /* UI state machine uses abstract button bits so it can be tested off-GBA. */
 enum { ED_SCREEN_EDIT, ED_SCREEN_MENU, ED_SCREEN_CONFIRM_NEW };
 enum { ED_INPUT_SELECT = 1, ED_INPUT_A = 2, ED_INPUT_B = 4, ED_INPUT_START = 8 };
