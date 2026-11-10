@@ -1,4 +1,4 @@
-/* Experimental visual metatile editor. Separate, checked SRAM; not a game loader. */
+/* Multi-slot visual editor. Custom gameplay is not implemented. */
 #include <tonc.h>
 #include <string.h>
 #include "posprintf.h"
@@ -11,13 +11,61 @@
 #include "pusab.h"
 
 #define EDITOR_SRAM_ADDR 0x6000
+#define BANK_BASE 0x6300
+#define BANK_ADDR(slot,bank) (BANK_BASE + ((slot)*2+(bank))*ED_BANK_BYTES)
 #define VIEW_W 14
 #define VIEW_H 6
 /* Compile-time overlap guard against stock SaveBlock growth. */
 typedef char editor_sram_after_save[(sizeof(struct SaveBlock) <= EDITOR_SRAM_ADDR) ? 1 : -1];
 static EWRAM_DATA EditorLevel editor_level;
 static EWRAM_DATA u8 editor_blob[ED_SAVE_BYTES];
-static EWRAM_DATA u8 editor_verify[ED_SAVE_BYTES];
+static EWRAM_DATA u8 bank_a[ED_BANK_BYTES], bank_b[ED_BANK_BYTES];
+static EWRAM_DATA u8 bank_out[ED_BANK_BYTES], bank_verify[ED_BANK_BYTES];
+typedef char editor_banks_fit[(BANK_BASE + ED_SLOT_COUNT*2*ED_BANK_BYTES <= 0x8000) ? 1 : -1];
+static int slot_status[ED_SLOT_COUNT], slot_write[ED_SLOT_COUNT];
+static int legacy_valid, legacy_unknown;
+static int active_slot=-1, screen_list, screen_detail, list_cursor, detail_cursor;
+static int dirty, legacy_copy;
+static int blank(const u8 *p, unsigned n) {
+    int z=1,f=1; unsigned i; for(i=0;i<n;i++) { if(p[i]) z=0; if(p[i]!=0xff) f=0; }
+    return z||f;
+}
+static int read_banks(int slot) {
+    return sram_read(BANK_ADDR(slot,0),bank_a,ED_BANK_BYTES)==0 &&
+           sram_read(BANK_ADDR(slot,1),bank_b,ED_BANK_BYTES)==0;
+}
+/* Legacy stays in its original address; saving an edit creates a separate copy. */
+static void refresh_slots(void) {
+    unsigned i;
+    if(sram_read(EDITOR_SRAM_ADDR,editor_blob,ED_SAVE_BYTES)!=0) { legacy_valid=0; legacy_unknown=1; }
+    else { legacy_valid=ed_decode(&editor_level,editor_blob); legacy_unknown=!legacy_valid && !blank(editor_blob,ED_SAVE_BYTES); }
+    for(i=0;i<ED_SLOT_COUNT;i++) {
+        int writable=0, chosen=-1;
+        if(read_banks(i)) chosen=ed_choose_bank(bank_a,bank_b,&writable);
+        slot_status[i]=chosen>=0 ? 1 : (writable ? 0 : -1);
+        slot_write[i]=writable;
+    }
+}
+static int load_slot(int slot) {
+    int writable, chosen;
+    if(slot<0) return sram_read(EDITOR_SRAM_ADDR,editor_blob,ED_SAVE_BYTES)==0 && ed_decode(&editor_level,editor_blob);
+    if(!read_banks(slot)) return 0;
+    chosen=ed_choose_bank(bank_a,bank_b,&writable);
+    return chosen>=0 && ed_bank_read(chosen?bank_b:bank_a,&editor_level,0)==ED_BANK_VALID;
+}
+static int save_slot(int slot) {
+    int writable, chosen, target; uint32_t seq=0;
+    if(slot<0 || slot>=ED_SLOT_COUNT || !read_banks(slot)) return 0;
+    chosen=ed_choose_bank(bank_a,bank_b,&writable);
+    if(!writable) return 0;
+    if(chosen>=0) ed_bank_read(chosen?bank_b:bank_a,0,&seq);
+    target=(chosen==0)?1:0;
+    ed_bank_encode(bank_out,&editor_level,seq+1);
+    return sram_write(BANK_ADDR(slot,target),bank_out,ED_BANK_BYTES)==0 &&
+           sram_read(BANK_ADDR(slot,target),bank_verify,ED_BANK_BYTES)==0 &&
+           !memcmp(bank_out,bank_verify,ED_BANK_BYTES);
+}
+
 /* Legacy IDs 1,2 remain block and spike in every version. The order below is
  * visual category order, not a contiguous metatile range. */
 static const u8 brushes[] = { ED_BLOCK, ED_DARK, ED_CHECK, ED_SLAB_UP,
@@ -30,13 +78,13 @@ static const char *names[] = {"VACIO","BLOQUE","PINCHO","BLOQUE OSCURO",
     "PINCHO ABAJO","PINCHO DER","PINCHO IZQ","PINCHO CHICO","CHICO INV",
     "PINCHO MEDIO","MEDIO INV"};
 static void text(int x,int y,const char *s) { tte_set_pos(x,y); tte_write(s); }
-/* CBB1 holds first 128 real game tiles; the editor's grid tile is #127. */
+/* CBB1 holds the first 128 game tiles; 128..131 are editor grid quadrants. */
 static void metatile_at(unsigned col, unsigned row, unsigned kind) {
     const SCR_ENTRY *m=metatiles[ed_metatile[kind]];
     unsigned base=row*32+col;
     if (kind==ED_EMPTY) {
-        se_mem[28][base]=0x107f; se_mem[28][base+1]=0x107f;
-        se_mem[28][base+32]=0x107f; se_mem[28][base+33]=0x107f;
+        se_mem[28][base]=0x1080; se_mem[28][base+1]=0x1081;
+        se_mem[28][base+32]=0x1082; se_mem[28][base+33]=0x1083;
     } else {
         se_mem[28][base]=m[0]; se_mem[28][base+1]=m[1];
         se_mem[28][base+32]=m[2]; se_mem[28][base+33]=m[3];
@@ -55,16 +103,30 @@ static void draw(unsigned x,unsigned y,unsigned left,unsigned top,unsigned selec
     /* Tile 4 is fully transparent, so 0..3 can be the cursor quadrants. */
     memset32(&se_mem[29][0],0x00040004,sizeof(SCREENBLOCK)/4);
     tte_erase_rect(0,0,240,160);
-    if (screen==ED_SCREEN_MENU) {
-        text(0,0,"MENU EDITOR"); text(0,16,"A NUEVO NIVEL");
-        text(0,32,"B VOLVER AL EDITOR"); text(0,48,"START SALIR AL TITULO");
-        text(0,80,"SALIR PIERDE LOS CAMBIOS"); text(0,96,"NO GUARDADOS");
-        text(0,120,"UN SOLO NIVEL GUARDADO"); text(0,136,"NIVELES NO JUGABLES"); return;
+    if(screen_list) {
+        text(0,0,"MIS NIVELES");
+        text(0,8,list_cursor==0?"> NUEVO":"  NUEVO");
+        for(int i=0;i<ED_SLOT_COUNT;i++) if(slot_status[i]!=0) {
+            posprintf(line,"%s NIVEL %d %s",list_cursor==i+1?">":" ",i+1,
+                      slot_status[i]<0?"BLOQUEADO":"VER");
+            text(0,16+i*16,line);
+        }
+        if(legacy_valid || legacy_unknown) text(0,112,list_cursor==7?"> ANTERIOR VER":"  ANTERIOR VER");
+        text(0,144,"A VER/NUEVO B TITULO"); text(0,152,status); return;
     }
-    if (screen==ED_SCREEN_CONFIRM_NEW) {
-        text(0,0,"NUEVO NIVEL?"); text(0,16,"A CONFIRMAR B CANCELAR");
-        text(0,48,"BORRA EL NIVEL ACTUAL"); text(0,64,"Y CAMBIOS NO GUARDADOS");
-        text(0,96,"EL GUARDADO SIGUE IGUAL"); text(0,112,"HASTA PULSAR START"); return;
+    if(screen_detail) {
+        posprintf(line,active_slot<0?"NIVEL ANTERIOR":"NIVEL %d",active_slot+1); text(0,0,line);
+        text(0,24,detail_cursor==0?"> JUGAR NO DISPONIBLE":"  JUGAR NO DISPONIBLE");
+        text(0,48,detail_cursor==1?"> EDITAR":"  EDITAR");
+        if(active_slot<0) text(0,80,"START GUARDA COPIA");
+        else if(!slot_write[active_slot]) text(0,80,"GUARDADO BLOQUEADO");
+        text(0,128,"A ELEGIR B VOLVER"); text(0,144,status); return;
+    }
+    if (screen==ED_SCREEN_MENU) {
+        text(0,0,"MENU EDITOR"); text(0,16,"B VOLVER AL EDITOR");
+        text(0,32,"START VOLVER A LISTA");
+        text(0,64,"CAMBIOS SIN GUARDAR"); text(0,80,"SE PERDERAN AL SALIR");
+        text(0,112,"NIVELES NO JUGABLES"); return;
     }
     posprintf(line,"EDITOR X%02d Y%d NO JUGABLE",x+1,y+1); text(0,0,line);
     for(unsigned r=0;r<VIEW_H;r++) for(unsigned c=0;c<VIEW_W;c++)
@@ -80,16 +142,9 @@ static void draw(unsigned x,unsigned y,unsigned left,unsigned top,unsigned selec
 }
 void editor_loop(void) {
     unsigned x=0,y=0,left=0,top=0,selected=0;
-    int screen=ED_SCREEN_EDIT, locked=0; const char *status="START GUARDAR SELECT MENU";
-    if (sram_read(EDITOR_SRAM_ADDR,editor_blob,ED_SAVE_BYTES)!=0) {
-        ed_clear(&editor_level); locked=1; status="ERROR SRAM NO GUARDA";
-    } else if (!ed_decode(&editor_level,editor_blob)) {
-        /* Never overwrite an unknown/newer/corrupt nonempty record. */
-        unsigned i; int allzero=1, allff=1;
-        for(i=0;i<ED_SAVE_BYTES;i++) { if(editor_blob[i]) allzero=0; if(editor_blob[i]!=0xff) allff=0; }
-        ed_clear(&editor_level);
-        if(!allzero && !allff) { locked=1; status="SRAM DESCONOCIDA BLOQUEADA"; }
-    }
+    int screen=ED_SCREEN_EDIT; const char *status="";
+    screen_list=1; screen_detail=0; list_cursor=detail_cursor=0; active_slot=-1; dirty=legacy_copy=0;
+    refresh_slots();
     REG_DISPCNT=DCNT_MODE0 | DCNT_BG0 | DCNT_BG1 | DCNT_BG2;
     REG_BLDCNT=0; REG_MOSAIC=0;
     REG_BG0CNT=BG_CBB(2)|BG_SBB(29)|BG_REG_32x32|BG_PRIO(0);
@@ -112,8 +167,13 @@ void editor_loop(void) {
     tte_init_se(2,BG_CBB(0)|BG_SBB(27)|BG_REG_32x32|BG_PRIO(1),0,0,0,&pusabFont,NULL);
     tte_set_special(0x2000);
     memcpy32(&tile_mem[1][0],blockset,128*sizeof(TILE)/4);
-    /* Fine blue grid: a line at the top/left of each 8x8 tile. */
-    for(unsigned r=0;r<8;r++) tile_mem[1][127].data[r]=(r==0)?0x11111111:0x11111112;
+    /* 16x16 grid cells: top/left outlines, one line per metatile. */
+    for(unsigned r=0;r<8;r++) {
+        tile_mem[1][128].data[r]=(r==0)?0x22222222:0x11111112;
+        tile_mem[1][129].data[r]=(r==0)?0x22222222:0x11111111;
+        tile_mem[1][130].data[r]=0x11111112;
+        tile_mem[1][131].data[r]=0x11111111;
+    }
     memset32(&tile_mem[2][0],0,5*sizeof(TILE)/4);
     /* Colour 15 in palette bank 1 is the cursor, indices reflect GBA nibble order. */
     for(unsigned r=0;r<8;r++) {
@@ -123,47 +183,75 @@ void editor_loop(void) {
         tile_mem[2][3].data[r]=(r==7)?0xffffffff:0xf0000000;
     }
     /* Cursor tiles use palette 1. */
-    palette_buffer[17]=0x5400; palette_buffer[18]=0x4000; palette_buffer[31]=0x03ff;
+    palette_buffer[17]=0x5000; palette_buffer[18]=0x7e80; palette_buffer[31]=0x03ff;
     memcpy32(pal_bg_mem,palette_buffer,256);
     memset32(&se_mem[27][0],0,sizeof(SCREENBLOCK)/4);
     VBlankIntrWait(); draw(x,y,left,top,selected,screen,status);
     while(1) {
-        unsigned input=0; int old=screen,action;
-        unsigned old_x=x,old_y=y,old_selected=selected; const char *old_status=status;
+        int changed=0;
         key_poll();
-        if(key_hit(KEY_SELECT)) input|=ED_INPUT_SELECT;
-        if(key_hit(KEY_A)) input|=ED_INPUT_A;
-        if(key_hit(KEY_B)) input|=ED_INPUT_B;
-        if(key_hit(KEY_START)) input|=ED_INPUT_START;
-        action=ed_menu_input(&screen,input);
-        if(action==ED_ACTION_EXIT) { game_state=STATE_TITLE_SCREEN; return; }
-        if(action==ED_ACTION_NEW) { ed_clear(&editor_level); x=y=left=top=selected=0; status=locked?"SRAM BLOQUEADA":"NUEVO SIN GUARDAR"; }
-        if(old==ED_SCREEN_EDIT && screen==ED_SCREEN_EDIT) {
-            if(key_hit(KEY_LEFT)&&x>0) x--;
-            if(key_hit(KEY_RIGHT)&&x+1<ED_WIDTH) x++;
-            if(key_hit(KEY_UP)&&y>0) y--;
-            if(key_hit(KEY_DOWN)&&y+1<ED_HEIGHT) y++;
-            if(key_hit(KEY_L)) selected=(selected+BRUSH_COUNT-1)%BRUSH_COUNT;
-            if(key_hit(KEY_R)) selected=(selected+1)%BRUSH_COUNT;
-            if(input&ED_INPUT_A) { ed_put(&editor_level,x,y,brushes[selected]); status=locked?"SRAM BLOQUEADA":"SIN GUARDAR"; }
-            if(input&ED_INPUT_B) { ed_put(&editor_level,x,y,ED_EMPTY); status=locked?"SRAM BLOQUEADA":"SIN GUARDAR"; }
-            if(input&ED_INPUT_START) {
-                if(locked) status="SRAM BLOQUEADA";
-                else { ed_encode(&editor_level,editor_blob);
-                    if(sram_write(EDITOR_SRAM_ADDR,editor_blob,ED_SAVE_BYTES)==0 &&
-                       sram_read(EDITOR_SRAM_ADDR,editor_verify,ED_SAVE_BYTES)==0 &&
-                       !memcmp(editor_blob,editor_verify,ED_SAVE_BYTES)) status="GUARDADO";
-                    else status="ERROR AL GUARDAR";
+        if(screen_list) {
+            int old=list_cursor;
+            if(key_hit(KEY_UP)) { do { list_cursor=(list_cursor+7)%8; }
+                while(list_cursor && !(list_cursor==7?(legacy_valid||legacy_unknown):slot_status[list_cursor-1]!=0)); }
+            if(key_hit(KEY_DOWN)) { do { list_cursor=(list_cursor+1)%8; }
+                while(list_cursor && !(list_cursor==7?(legacy_valid||legacy_unknown):slot_status[list_cursor-1]!=0)); }
+            if(key_hit(KEY_B)) { game_state=STATE_TITLE_SCREEN; return; }
+            if(key_hit(KEY_A)) {
+                if(list_cursor==0) {
+                    int slot; for(slot=0;slot<ED_SLOT_COUNT;slot++) if(slot_status[slot]==0 && slot_write[slot]) break;
+                    if(slot==ED_SLOT_COUNT) status="SIN ESPACIO DISPONIBLE";
+                    else { active_slot=slot; ed_clear(&editor_level); dirty=1; legacy_copy=0;
+                        x=y=left=top=selected=0; screen_list=0; status="START GUARDAR SELECT MENU"; }
+                } else {
+                    active_slot=list_cursor==7?-1:list_cursor-1;
+                    if((active_slot<0 && !legacy_valid) || (active_slot>=0 && slot_status[active_slot]<0)) status="NIVEL DANADO BLOQUEADO";
+                    else { screen_list=0; screen_detail=1; detail_cursor=0; status=""; }
                 }
+                changed=1;
             }
-            if(x<left) left=x;
-            if(x>=left+VIEW_W) left=x-VIEW_W+1;
-            if(y<top) top=y;
-            if(y>=top+VIEW_H) top=y-VIEW_H+1;
+            if(old!=list_cursor) changed=1;
+        } else if(screen_detail) {
+            if(key_hit(KEY_UP)||key_hit(KEY_DOWN)) { detail_cursor^=1; changed=1; }
+            if(key_hit(KEY_B)) { screen_detail=0; screen_list=1; status=""; changed=1; }
+            else if(key_hit(KEY_A)) {
+                if(detail_cursor==0) status="JUGAR NO DISPONIBLE";
+                else if(load_slot(active_slot)) { screen_detail=0; screen=ED_SCREEN_EDIT; dirty=0; legacy_copy=(active_slot<0);
+                    x=y=left=top=selected=0; status=active_slot<0?"START GUARDA COPIA":"START GUARDAR SELECT MENU"; }
+                else status="ERROR AL LEER NIVEL";
+                changed=1;
+            }
+        } else if(screen==ED_SCREEN_MENU) {
+            if(key_hit(KEY_B)) { screen=ED_SCREEN_EDIT; changed=1; }
+            else if(key_hit(KEY_START)) { refresh_slots(); screen_list=1; screen=ED_SCREEN_EDIT;
+                status=dirty?"CAMBIOS DESCARTADOS":""; changed=1; }
+        } else {
+            if(key_hit(KEY_SELECT)) { screen=ED_SCREEN_MENU; changed=1; }
+            else {
+                if(key_hit(KEY_LEFT)&&x>0) { x--; changed=1; }
+                if(key_hit(KEY_RIGHT)&&x+1<ED_WIDTH) { x++; changed=1; }
+                if(key_hit(KEY_UP)&&y>0) { y--; changed=1; }
+                if(key_hit(KEY_DOWN)&&y+1<ED_HEIGHT) { y++; changed=1; }
+                if(key_hit(KEY_L)) { selected=(selected+BRUSH_COUNT-1)%BRUSH_COUNT; changed=1; }
+                if(key_hit(KEY_R)) { selected=(selected+1)%BRUSH_COUNT; changed=1; }
+                if(key_hit(KEY_A)) { ed_put(&editor_level,x,y,brushes[selected]); dirty=1; status="SIN GUARDAR"; changed=1; }
+                if(key_hit(KEY_B)) { ed_put(&editor_level,x,y,ED_EMPTY); dirty=1; status="SIN GUARDAR"; changed=1; }
+                if(key_hit(KEY_START)) {
+                    if(active_slot<0 && legacy_copy) {
+                        int slot; for(slot=0;slot<ED_SLOT_COUNT;slot++) if(slot_status[slot]==0 && slot_write[slot]) break;
+                        if(slot==ED_SLOT_COUNT) status="SIN ESPACIO PARA COPIA";
+                        else if(save_slot(slot)) { active_slot=slot; legacy_copy=0; dirty=0; status="COPIA GUARDADA"; }
+                        else status="ERROR AL GUARDAR COPIA";
+                    } else if(save_slot(active_slot)) { status="GUARDADO"; dirty=0; }
+                    else status="ERROR/BLOQUEADO";
+                    changed=1;
+                }
+                if(x<left) left=x;
+                if(x>=left+VIEW_W) left=x-VIEW_W+1;
+                if(y<top) top=y;
+                if(y>=top+VIEW_H) top=y-VIEW_H+1;
+            }
         }
-        VBlankIntrWait();
-        if(old!=screen || old_x!=x || old_y!=y || old_selected!=selected ||
-           old_status!=status || input || action)
-            draw(x,y,left,top,selected,screen,status);
+        VBlankIntrWait(); if(changed) draw(x,y,left,top,selected,screen,status);
     }
 }
