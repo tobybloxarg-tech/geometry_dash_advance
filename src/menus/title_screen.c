@@ -30,7 +30,7 @@ void draw_button_glyphs_title_screen();
 
 static void draw_create_button(void) {
     static const char label[] = "ABAJO: CREAR";
-    const u32 *font = pusabGlyphs;
+    const unsigned int *font = pusabGlyphs;
     TILE *tiles = &tile_mem[0][CREATE_BUTTON_TILE];
     unsigned i, row, pixel;
 
