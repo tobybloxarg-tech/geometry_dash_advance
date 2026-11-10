@@ -1,10 +1,15 @@
 #include "editor_play.h"
 #include <string.h>
 
-static EditorLevel play_level;
+#if defined(__arm__)
+#define ED_EWRAM __attribute__((section(".ewram")))
+#else
+#define ED_EWRAM
+#endif
+static ED_EWRAM EditorLevel play_level;
 static int active, error_code;
 /* Five halfwords per object and one complete sentinel halfword. */
-static uint16_t sprite_stream[ED_PLAY_MAX_SPRITES * ED_PLAY_RECORD_WORDS + 1];
+static ED_EWRAM uint16_t sprite_stream[ED_PLAY_MAX_SPRITES * ED_PLAY_RECORD_WORDS + 1];
 static unsigned sprite_words;
 
 int ed_play_prepare(const EditorLevel *level) {
