@@ -22,6 +22,55 @@ void title_screen_players();
 void reset_title_screen_player();
 void draw_button_glyphs_title_screen();
 
+/* BG character tiles 0-255 and 256-767 belong to the backgrounds and title;
+ * screenblocks begin at tile 832. These 16 tiles fit in the gap (768-783).
+ * Keep the button on BG0 so it needs no extra OAM sprites every frame. */
+#define CREATE_BUTTON_TILE 768
+#define CREATE_BUTTON_PAL 4
+
+static void draw_create_button(void) {
+    static const char label[] = "ABAJO: CREAR";
+    const u32 *font = pusabGlyphs;
+    TILE *tiles = &tile_mem[0][CREATE_BUTTON_TILE];
+    unsigned i, row, pixel;
+
+    /* Pusab uses 1/2/3; make transparent pixels an opaque button fill. */
+    for (i = 0; i < sizeof(label) - 1; i++) {
+        for (row = 0; row < 8; row++) {
+            u32 source = font[(unsigned char)label[i] * 8 + row];
+            u32 result = 0;
+            for (pixel = 0; pixel < 8; pixel++) {
+                u32 color = (source >> (pixel * 4)) & 15;
+                result |= (color ? color : 4) << (pixel * 4);
+            }
+            tiles[i].data[row] = result;
+        }
+    }
+    /* One-pixel border, with a dark, opaque interior. */
+    for (row = 0; row < 8; row++) {
+        tiles[12].data[row] = 0x44444445; /* left */
+        tiles[13].data[row] = 0x54444444; /* right */
+        tiles[14].data[row] = row == 0 ? 0x55555555 : 0x44444444; /* top */
+        tiles[15].data[row] = row == 7 ? 0x55555555 : 0x44444444; /* bottom */
+    }
+    palette_buffer[CREATE_BUTTON_PAL * 16 + 1] = CLR_WHITE;
+    palette_buffer[CREATE_BUTTON_PAL * 16 + 2] = 0x0000;
+    palette_buffer[CREATE_BUTTON_PAL * 16 + 3] = 0x5294;
+    palette_buffer[CREATE_BUTTON_PAL * 16 + 4] = 0x2000;
+    palette_buffer[CREATE_BUTTON_PAL * 16 + 5] = 0x03FF;
+
+    /* BG0 is scrolled 8px right: columns 1-14 appear at x=0..111.
+     * Rows 15-17 avoid the title, main buttons, and SELECT icon. */
+    for (i = 0; i < 14; i++) {
+        se_mem[26][15 * 32 + 1 + i] = (CREATE_BUTTON_PAL << 12) | (CREATE_BUTTON_TILE + 14);
+        se_mem[26][17 * 32 + 1 + i] = (CREATE_BUTTON_PAL << 12) | (CREATE_BUTTON_TILE + 15);
+    }
+    se_mem[26][16 * 32 + 1] = (CREATE_BUTTON_PAL << 12) | (CREATE_BUTTON_TILE + 12);
+    for (i = 0; i < sizeof(label) - 1; i++)
+        se_mem[26][16 * 32 + 2 + i] = (CREATE_BUTTON_PAL << 12) | (CREATE_BUTTON_TILE + i);
+    se_mem[26][16 * 32 + 14] = (CREATE_BUTTON_PAL << 12) | (CREATE_BUTTON_TILE + 13);
+}
+
 extern u16 __key_curr;
 
 INLINE void do_button_draw() {
@@ -59,6 +108,7 @@ void title_screen_loop() {
     memcpy32(&se_mem[26][0], title_screen_l0_tilemap, sizeof(title_screen_l0_tilemap) / sizeof(u32));
     memcpy32(&se_mem[27][0], title_screen_l1_tilemap, sizeof(title_screen_l1_tilemap) / sizeof(u32));
     memcpy32(&se_mem[28][0], square_background_tilemap, sizeof(square_background_tilemap) / sizeof(u32));
+    draw_create_button();
 
     // Button glyph chr
     memcpy16(&palette_buffer[0x1f0], button_glyph_pal, sizeof(button_glyph_pal) / sizeof(COLOR));
@@ -104,7 +154,7 @@ void title_screen_loop() {
         obj_copy(oam_mem, shadow_oam, 128);
         obj_aff_copy(obj_aff_mem, obj_aff_buffer, 32);
 
-        // Prototype editor (down on title screen)
+        // Labeled title-screen button: D-pad Down opens the prototype editor
         if (key_hit(KEY_DOWN)) {
             game_state = STATE_EDITOR;
             break;
