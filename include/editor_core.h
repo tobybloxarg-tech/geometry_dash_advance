@@ -55,6 +55,14 @@ enum { ED_SCREEN_EDIT, ED_SCREEN_MENU, ED_SCREEN_CONFIRM_NEW, ED_SCREEN_SETTINGS
 enum { ED_INPUT_SELECT = 1, ED_INPUT_A = 2, ED_INPUT_B = 4, ED_INPUT_START = 8 };
 enum { ED_ACTION_NONE, ED_ACTION_NEW, ED_ACTION_EXIT };
 int ed_menu_input(int *screen, unsigned input);
+/* Grid A/B gestures. Bits in down/hit are ED_INPUT_A and ED_INPUT_B.
+ * A short hold window admits a second overlapping press without an edit.
+ * After a chord, blocked remains set until both buttons are released. */
+#define ED_CHORD_WINDOW_FRAMES 9
+enum { ED_BUTTON_CHORD = 16 };
+typedef struct { unsigned pending, age, blocked; } EditorButtons;
+unsigned ed_edit_buttons_step(EditorButtons *state, unsigned down, unsigned hit,
+                              int in_grid, int flush);
 void ed_clear(EditorLevel *level);
 int ed_put(EditorLevel *level, unsigned x, unsigned y, unsigned kind);
 int ed_get(const EditorLevel *level, unsigned x, unsigned y);
