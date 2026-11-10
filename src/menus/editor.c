@@ -27,7 +27,12 @@ typedef char editor_banks_fit[(BANK_BASE + ED_SLOT_COUNT*2*ED_BANK_BYTES <= 0x80
 static int slot_status[ED_SLOT_COUNT], slot_write[ED_SLOT_COUNT];
 static int legacy_valid, legacy_unknown;
 static int active_slot=-1, screen_list, screen_detail, list_cursor, detail_cursor;
-static int dirty, legacy_copy;
+static int dirty, legacy_copy, settings_cursor;
+#define SONG_NAME(name, label) label,
+static const char *song_names[] = { ED_SONG_LIST(SONG_NAME) };
+#undef SONG_NAME
+static const char *mode_names[] = {"CUBO", "NAVE", "BOLA", "OVNI", "ONDA"};
+static const char *speed_names[] = {"0.5X", "1X", "2X", "3X", "4X"};
 static int blank(const u8 *p, unsigned n) {
     int z=1,f=1; unsigned i; for(i=0;i<n;i++) { if(p[i]) z=0; if(p[i]!=0xff) f=0; }
     return z||f;
@@ -62,7 +67,7 @@ static int save_slot(int slot) {
     if(!writable) return 0;
     if(chosen>=0) ed_bank_read(chosen?bank_b:bank_a,0,&seq);
     target=(chosen==0)?1:0;
-    ed_bank_encode(bank_out,&editor_level,seq+1);
+    if(!ed_bank_encode(bank_out,&editor_level,seq+1)) return 0;
     return sram_write(BANK_ADDR(slot,target),bank_out,ED_BANK_BYTES)==0 &&
            sram_read(BANK_ADDR(slot,target),bank_verify,ED_BANK_BYTES)==0 &&
            !memcmp(bank_out,bank_verify,ED_BANK_BYTES);
@@ -83,7 +88,11 @@ static const char *names[] = {"VACIO","BLOQUE","PINCHO","BLOQUE OSCURO",
 static const char *sprite_names[] = {"", "ORBE AMARILLO", "ORBE AZUL", "ORBE ROSA",
     "ORBE VERDE", "ORBE NEGRO", "ORBE ROJO", "PORTAL NAVE", "PORTAL CUBO",
     "PORTAL BOLA", "PORTAL OVNI", "PORTAL ONDA", "GRAVEDAD AZUL",
-    "GRAVEDAD AMARILLA", "PORTAL MINI", "PORTAL GRANDE"};
+    "GRAVEDAD AMARILLA", "PORTAL MINI", "PORTAL GRANDE",
+    "VELOCIDAD 0.5X", "VELOCIDAD 1X", "VELOCIDAD 2X",
+    "VELOCIDAD 3X", "VELOCIDAD 4X"};
+typedef char editor_sprite_name_count[(sizeof(sprite_names)/sizeof(sprite_names[0]) == ED_SPR_COUNT) ? 1 : -1];
+typedef char editor_sprite_icon_count[(sizeof(editor_sprite_tiles)/sizeof(editor_sprite_tiles[0]) == (ED_SPR_COUNT-1)*32) ? 1 : -1];
 static void text(int x,int y,const char *s) { tte_set_pos(x,y); tte_write(s); }
 /* CBB1 holds the first 128 game tiles; 128..131 are editor grid quadrants. */
 static void metatile_at(unsigned col, unsigned row, unsigned kind) {
@@ -139,9 +148,21 @@ static void draw(unsigned x,unsigned y,unsigned left,unsigned top,unsigned selec
     }
     if (screen==ED_SCREEN_MENU) {
         text(0,0,"MENU EDITOR"); text(0,16,"B VOLVER AL EDITOR");
-        text(0,32,"START VOLVER A LISTA");
-        text(0,64,"CAMBIOS SIN GUARDAR"); text(0,80,"SE PERDERAN AL SALIR");
+        text(0,32,"A AJUSTES DEL NIVEL");
+        text(0,48,"START VOLVER A LISTA");
+        text(0,80,"CAMBIOS SIN GUARDAR"); text(0,96,"SE PERDERAN AL SALIR");
         text(0,112,"JUGAR DESDE LA LISTA"); return;
+    }
+    if (screen==ED_SCREEN_SETTINGS) {
+        const EditorSettings *a=&editor_level.settings;
+        text(0,0,"AJUSTES DEL NIVEL");
+        posprintf(line,"%s MODO %s",settings_cursor==0?"X":" ",mode_names[a->mode]); text(0,24,line);
+        posprintf(line,"%s VELOCIDAD %s",settings_cursor==1?"X":" ",speed_names[a->speed]); text(0,40,line);
+        posprintf(line,"%s MINI %s",settings_cursor==2?"X":" ",a->mini?"SI":"NO"); text(0,56,line);
+        posprintf(line,"%s MUSICA",settings_cursor==3?"X":" "); text(0,72,line);
+        text(8,88,song_names[a->song]);
+        text(0,128,"ARRIBA ABAJO ELEGIR"); text(0,136,"IZQ DER CAMBIAR B VOLVER");
+        text(0,152,status); return;
     }
     posprintf(line,"EDITOR X%02d Y%d",x+1,y+1); text(0,0,line);
     for(unsigned r=0;r<VIEW_H;r++) for(unsigned c=0;c<VIEW_W;c++) {
@@ -240,6 +261,9 @@ void editor_loop(void) {
             else if(key_hit(KEY_A)) {
                 if(detail_cursor==0) {
                     if(!load_slot(active_slot)) status="ERROR AL LEER NIVEL";
+                    else if(!ed_play_configure(editor_level.settings.mode, editor_level.settings.speed,
+                                               editor_level.settings.mini, editor_level.settings.song))
+                        status="AJUSTES INVALIDOS";
                     else if(editor_play_start(&editor_level)) return;
                     else status=ed_play_error()==ED_PLAY_TOO_MANY ? "MAXIMO 16 OBJETOS" : "NIVEL INVALIDO";
                 }
@@ -248,8 +272,26 @@ void editor_loop(void) {
                 else status="ERROR AL LEER NIVEL";
                 changed=1;
             }
+        } else if(screen==ED_SCREEN_SETTINGS) {
+            if(key_hit(KEY_B)) { screen=ED_SCREEN_MENU; status=""; changed=1; }
+            else {
+                EditorSettings before=editor_level.settings;
+                if(key_hit(KEY_UP)) { settings_cursor=(settings_cursor+3)%4; changed=1; }
+                if(key_hit(KEY_DOWN)) { settings_cursor=(settings_cursor+1)%4; changed=1; }
+                int delta=key_hit(KEY_LEFT)?-1:key_hit(KEY_RIGHT)?1:0;
+                if(delta) {
+                    if(settings_cursor==0) editor_level.settings.mode=(before.mode+ED_MODE_COUNT+delta)%ED_MODE_COUNT;
+                    else if(settings_cursor==1) editor_level.settings.speed=(before.speed+ED_SPEED_COUNT+delta)%ED_SPEED_COUNT;
+                    else if(settings_cursor==2) editor_level.settings.mini^=1;
+                    else editor_level.settings.song=(before.song+ED_SONG_COUNT+delta)%ED_SONG_COUNT;
+                    if(!ed_can_encode(&editor_level)) { editor_level.settings=before; status="MAXIMO 128 OBJETOS"; }
+                    else { dirty=1; status="SIN GUARDAR"; }
+                    changed=1;
+                }
+            }
         } else if(screen==ED_SCREEN_MENU) {
             if(key_hit(KEY_B)) { screen=ED_SCREEN_EDIT; changed=1; }
+            else if(key_hit(KEY_A)) { screen=ED_SCREEN_SETTINGS; settings_cursor=0; status=""; changed=1; }
             else if(key_hit(KEY_START)) { refresh_slots(); screen_list=1; screen=ED_SCREEN_EDIT;
                 status=dirty?"CAMBIOS DESCARTADOS":""; changed=1; }
         } else {
@@ -263,8 +305,17 @@ void editor_loop(void) {
                 if(key_hit(KEY_R)) { selected=(selected+1)%BRUSH_COUNT; changed=1; }
                 if(key_hit(KEY_A)) {
                     if(selected<TERRAIN_BRUSH_COUNT) ed_put(&editor_level,x,y,brushes[selected]);
-                    else ed_sprite_put(&editor_level,x,y,selected-TERRAIN_BRUSH_COUNT+1);
+                    else {
+                        int old=ed_sprite_get(&editor_level,x,y);
+                        ed_sprite_put(&editor_level,x,y,selected-TERRAIN_BRUSH_COUNT+1);
+                        if(!ed_can_encode(&editor_level)) {
+                            ed_sprite_put(&editor_level,x,y,(unsigned)old);
+                            status="MAXIMO 128 OBJETOS"; changed=1;
+                            goto placement_done;
+                        }
+                    }
                     dirty=1; status="SIN GUARDAR"; changed=1;
+placement_done: ;
                 }
                 if(key_hit(KEY_B)) {
                     if(selected<TERRAIN_BRUSH_COUNT) ed_put(&editor_level,x,y,ED_EMPTY);
