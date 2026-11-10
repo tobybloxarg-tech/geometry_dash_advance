@@ -11,6 +11,16 @@
 #define ED_PLAY_RECORD_WORDS 5
 enum { ED_PLAY_OK, ED_PLAY_INVALID, ED_PLAY_TOO_MANY };
 
+/* Stable UI values: modes cube/ship/ball/ufo/wave = 0..4, speed
+ * 0.5x/1x/2x/3x/4x = 0..4, mini = 0/1, song = index into ED_SONG_LIST (not a generated MOD_* value). Call configure for
+ * EVERY attempt before editor_play_start; prepare snapshots these values. */
+#define ED_PLAY_MODE_COUNT 5
+#define ED_PLAY_SPEED_COUNT 5
+#define ED_PLAY_SONG_COUNT ED_SONG_COUNT
+typedef struct { uint8_t mode, speed, mini, song; } EditorPlayConfig;
+int ed_play_configure(unsigned mode, unsigned speed, unsigned mini, unsigned song);
+EditorPlayConfig ed_play_config(void);
+
 /* Pure data adapter. It owns a validated snapshot, so SRAM and editor RAM
  * are never modified while playing. Out-of-range columns are always air. */
 int ed_play_prepare(const EditorLevel *level);
