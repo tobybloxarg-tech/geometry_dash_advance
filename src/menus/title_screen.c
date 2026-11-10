@@ -300,6 +300,11 @@ void reset_title_screen_player() {
 }
 
 void title_screen_players() {
+    /* The demo player uses Tonc's global key state for synthetic input.
+     * Preserve the physical key history so the next key_poll() can detect
+     * real button edges correctly, including buttons held across frames. */
+    u16 real_key_curr = __key_curr;
+    u16 real_key_prev = __key_prev;
     curr_player_id = ID_PLAYER_1;
     curr_player = player_1;
     
@@ -342,6 +347,9 @@ void title_screen_players() {
 
     player_main();
     draw_player();
+
+    __key_curr = real_key_curr;
+    __key_prev = real_key_prev;
 
     // Cap y position
     if (curr_player.player_y < TO_FIXED(0x728)) {
