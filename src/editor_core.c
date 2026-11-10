@@ -1,5 +1,25 @@
 #include "editor_core.h"
 #include <string.h>
+int ed_menu_input(int *screen, unsigned input) {
+    switch (*screen) {
+    case ED_SCREEN_EDIT:
+        if (input & ED_INPUT_SELECT) *screen = ED_SCREEN_MENU;
+        break;
+    case ED_SCREEN_MENU:
+        if (input & ED_INPUT_B) *screen = ED_SCREEN_EDIT;
+        else if (input & ED_INPUT_A) *screen = ED_SCREEN_CONFIRM_NEW;
+        else if (input & ED_INPUT_START) return ED_ACTION_EXIT;
+        break;
+    case ED_SCREEN_CONFIRM_NEW:
+        if (input & ED_INPUT_B) *screen = ED_SCREEN_MENU;
+        else if (input & ED_INPUT_A) {
+            *screen = ED_SCREEN_EDIT;
+            return ED_ACTION_NEW;
+        }
+        break;
+    }
+    return ED_ACTION_NONE;
+}
 void ed_clear(EditorLevel *level) { memset(level->cells, 0, sizeof(level->cells)); }
 int ed_put(EditorLevel *level, unsigned x, unsigned y, unsigned kind) {
     if (x >= ED_WIDTH || y >= ED_HEIGHT || kind >= ED_KIND_COUNT) return 0;
