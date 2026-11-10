@@ -7,7 +7,12 @@
 #define ED_CELLS (ED_WIDTH * ED_HEIGHT)
 #define ED_SAVE_BYTES (8 + ED_CELLS + 4)
 /* Stable editor symbols, not the engine's actual metatile IDs. */
-enum { ED_EMPTY, ED_BLOCK, ED_SPIKE, ED_KIND_COUNT };
+enum { ED_EMPTY, ED_BLOCK, ED_SPIKE, ED_DARK, ED_CHECK, ED_SLAB_UP,
+       ED_SLAB_DOWN, ED_SLAB_LEFT, ED_SLAB_RIGHT, ED_SPIKE_DOWN,
+       ED_SPIKE_RIGHT, ED_SPIKE_LEFT, ED_SMALL_UP, ED_SMALL_DOWN,
+       ED_MEDIUM_UP, ED_MEDIUM_DOWN, ED_KIND_COUNT };
+/* Index is a stable editor symbol; result is an actual metatiles[] index. */
+extern const uint16_t ed_metatile[ED_KIND_COUNT];
 typedef struct { uint8_t cells[ED_CELLS]; } EditorLevel;
 /* UI state machine uses abstract button bits so it can be tested off-GBA. */
 enum { ED_SCREEN_EDIT, ED_SCREEN_MENU, ED_SCREEN_CONFIRM_NEW };
