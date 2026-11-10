@@ -564,7 +564,7 @@ void load_level(u32 level_ID) {
     player_1.gamemode = properties_pointer[GAMEMODE_INDEX];
     speed_id = properties_pointer[SPEED_INDEX];
     curr_level_height = properties_pointer[LEVEL_HEIGHT_INDEX];
-    curr_level_width = properties_pointer[LEVEL_WIDTH_INDEX];
+    curr_level_width = ed_play_active() ? ed_play_width() : properties_pointer[LEVEL_WIDTH_INDEX];
     loaded_song_id = properties_pointer[LEVEL_SONG_INDEX];
     if (ed_play_active()) {
         /* Resolve stable editor IDs independently of sound-test ordering. */
@@ -1052,7 +1052,7 @@ void draw_attempt_counter() {
 u32 get_level_progress() {
     if (ed_play_active()) {
         s64 pixels = curr_player.player_x >> SUBPIXEL_BITS;
-        u32 finish = (ED_PLAY_WIDTH << 4) - 0x98;
+        u32 finish = (ed_play_width() << 4) - 0x98;
         if (pixels <= 0) return 0;
         if ((u64)pixels >= finish || complete_cutscene) return 100;
         return (u32)pixels * 100 / finish;

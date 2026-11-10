@@ -25,13 +25,16 @@ int ed_play_configure(unsigned mode, unsigned speed, unsigned mini, unsigned son
 }
 EditorPlayConfig ed_play_config(void) { return active ? play_config : pending_config; }
 
+unsigned ed_play_width(void) { return active ? play_level.width + 10 : 0; }
+
 int ed_play_prepare(const EditorLevel *level) {
     unsigned i, x, y, count = 0, last_x = 0, n = 0;
-    if (active || !level) { error_code = ED_PLAY_INVALID; return 0; }
+    if (active || !level || level->width < ED_OLD_WIDTH || level->width > ED_WIDTH || level->width % 16) { error_code = ED_PLAY_INVALID; return 0; }
     /* Invalidate even after failure; never let a stale prior stream start. */
     sprite_words = 0;
     for (i = 0; i < ED_CELLS; ++i) {
-        if (level->cells[i] >= ED_KIND_COUNT || level->sprites[i] >= ED_SPR_COUNT) {
+        if (level->cells[i] >= ED_KIND_COUNT || level->sprites[i] >= ED_SPR_COUNT ||
+            (i % ED_WIDTH >= level->width && (level->cells[i] || level->sprites[i]))) {
             error_code = ED_PLAY_INVALID; return 0;
         }
         if (level->sprites[i] && ++count > ED_PLAY_MAX_SPRITES) {
@@ -42,7 +45,7 @@ int ed_play_prepare(const EditorLevel *level) {
     play_config = pending_config;
     /* Exporter sorts by X then Y. Its Y is a Tiled tile object's bottom
      * edge, so add one cell to match the editor's top-left anchor. */
-    for (x = 0; x < ED_WIDTH; ++x) for (y = 0; y < ED_HEIGHT; ++y) {
+    for (x = 0; x < play_level.width; ++x) for (y = 0; y < ED_HEIGHT; ++y) {
         unsigned kind = play_level.sprites[y * ED_WIDTH + x];
         if (!kind) continue;
         sprite_stream[n++] = x * 16 - last_x;
@@ -70,8 +73,8 @@ int ed_play_record_valid(const uint16_t *record, uint32_t last_x) {
     if (sprite_words - offset < ED_PLAY_RECORD_WORDS) return 0;
     for (k = 1; k < ED_SPR_COUNT; ++k)
         if (record[2] == ed_sprite_type[k]) found = 1;
-    return found && record[0] % 16 == 0 && last_x <= (ED_WIDTH-1)*16 &&
-           record[0] <= (ED_WIDTH-1)*16 - last_x &&
+    return found && record[0] % 16 == 0 && last_x <= (play_level.width-1)*16 &&
+           record[0] <= (play_level.width-1)*16 - last_x &&
            record[1] >= 16 && record[1] <= ED_HEIGHT*16 && record[1] % 16 == 0 &&
            record[3] == 0x20 && record[4] == 0;
 }
@@ -79,7 +82,7 @@ void ed_play_end(void) { active = 0; }
 int ed_play_active(void) { return active; }
 uint16_t ed_play_metatile(unsigned layer, unsigned x, unsigned y) {
     unsigned kind;
-    if (!active || layer != 0 || x >= ED_WIDTH || y >= ED_HEIGHT) return 0;
+    if (!active || layer != 0 || x >= play_level.width || y >= ED_HEIGHT) return 0;
     kind = play_level.cells[y * ED_WIDTH + x];
     return kind < ED_KIND_COUNT ? ed_metatile[kind] : 0;
 }

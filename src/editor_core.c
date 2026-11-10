@@ -72,6 +72,7 @@ unsigned ed_edit_buttons_step(EditorButtons *s, unsigned down, unsigned hit,
 void ed_clear(EditorLevel *level) {
     memset(level, 0, sizeof(*level));
     level->settings.speed = ED_SPEED_X1;
+    level->width = ED_WIDTH;
 }
 int ed_settings_valid(const EditorSettings *s) {
     return s && s->mode < ED_MODE_COUNT && s->speed < ED_SPEED_COUNT &&
@@ -80,16 +81,6 @@ int ed_settings_valid(const EditorSettings *s) {
 static int default_settings(const EditorSettings *s) {
     return s->mode == ED_MODE_CUBE && s->speed == ED_SPEED_X1 &&
            !s->mini && s->song == ED_SONG_STEREOMA;
-}
-int ed_can_encode(const EditorLevel *level) {
-    unsigned i, count=0; int fits_v4=1;
-    if (!level || !ed_settings_valid(&level->settings)) return 0;
-    for(i=0;i<ED_CELLS;i++) {
-        if(level->cells[i]>=ED_KIND_COUNT || level->sprites[i]>=ED_SPR_COUNT || level->sprites[i]>=32) return 0;
-        if(level->sprites[i]) count++;
-        if(level->sprites[i]>=16) fits_v4=0;
-    }
-    return (default_settings(&level->settings) && fits_v4) || count<=ED_V5_MAX_SPRITES;
 }
 int ed_put(EditorLevel *level, unsigned x, unsigned y, unsigned kind) {
     if (x >= ED_WIDTH || y >= ED_HEIGHT || kind >= ED_KIND_COUNT) return 0;
@@ -102,85 +93,180 @@ int ed_get(const EditorLevel *level, unsigned x, unsigned y) {
 static uint32_t checksum(const uint8_t *p, size_t n) {
     uint32_t h = 2166136261u; while (n--) { h ^= *p++; h *= 16777619u; } return h;
 }
-/* v4 retains dense two-nibble records for default settings. v5 keeps the
- * exact same byte length and bank addresses: 256 bytes of packed terrain,
- * followed by 128 little-endian sparse (9-bit cell, 5-bit sprite) entries.
- * Header 5: mode[0..2], speed[3..5], mini[6]; 6: song; 7: count.
- * Unused sprite entries must be zero and indices strictly increasing. */
-int ed_encode(const EditorLevel *level, uint8_t out[ED_SAVE_BYTES]) {
-    uint32_t h; unsigned i, n=0; int v4;
-    if (!out || !ed_can_encode(level)) return 0;
+/* The SRAM record and bank addresses remain unchanged. Old versions use
+ * a 64x8 row-major grid. V6 uses a 512-byte command area, row-major at the
+ * declared width. Runs never exceed the declared grid and padding is zero.
+ * 00..7f: 1..128 empty cells; 80..bf: 1..64 cells of following terrain;
+ * c1..df: one sprite (low five bits), next byte terrain; e1..ef: one terrain.
+ * The header holds settings and the width in 16-column units; the stream
+ * is self-terminating after exactly width*8 cells. The checksum covers padding.
+ * V6 is intentionally rejected by older builds rather than misread. */
+static int legacy_mode(const EditorLevel *level) {
+    unsigned x,y,n=0; int v4;
+    if(level->width!=ED_OLD_WIDTH || !ed_settings_valid(&level->settings)) return 0;
     v4=default_settings(&level->settings);
-    for(i=0;i<ED_CELLS;i++) if(level->sprites[i]>=16) v4=0;
-    memset(out,0,ED_SAVE_BYTES);
-    memcpy(out,"GDED",4); out[4]=(uint8_t)(v4?4:5);
-    if(v4) {
-        out[5]=ED_WIDTH; out[6]=ED_HEIGHT;
-        for(i=0;i<ED_CELLS;i++) out[8+i]=(uint8_t)(level->cells[i] | (level->sprites[i]<<4));
-    } else {
-        out[5]=(uint8_t)(level->settings.mode | (level->settings.speed<<3) | (level->settings.mini<<6));
-        out[6]=level->settings.song;
-        for(i=0;i<ED_CELLS;i++) {
-            out[8+i/2] |= (uint8_t)(level->cells[i] << (4*(i%2)));
-            if(level->sprites[i]) {
-                unsigned entry=i | (level->sprites[i]<<9);
-                out[8+ED_CELLS/2+n*2]=(uint8_t)entry;
-                out[8+ED_CELLS/2+n*2+1]=(uint8_t)(entry>>8); n++;
+    for(y=0;y<ED_HEIGHT;y++) for(x=0;x<ED_WIDTH;x++) {
+        unsigned i=y*ED_WIDTH+x, c=level->cells[i], s=level->sprites[i];
+        if(c>=ED_KIND_COUNT || s>=ED_SPR_COUNT) return 0;
+        if(x>=ED_OLD_WIDTH && (c||s)) return 0;
+        if(x<ED_OLD_WIDTH) { if(s) n++; if(s>=16) v4=0; }
+    }
+    return v4 ? 4 : n<=ED_V5_MAX_SPRITES ? 5 : 0;
+}
+/* Return zero on invalid or insufficient capacity, else number of bytes used
+ * plus one, so an empty 0-byte result is never confused with failure. */
+static unsigned encode_v6(const EditorLevel *l, uint8_t *out) {
+    unsigned i=0, pos=0, total, width=l->width;
+    if(width<ED_OLD_WIDTH || width>ED_WIDTH || (width%16) || !ed_settings_valid(&l->settings)) return 0;
+    /* Out-of-width data is forbidden: encoding must never silently discard it. */
+    for(unsigned y=0;y<ED_HEIGHT;y++) for(unsigned x=0;x<ED_WIDTH;x++) {
+        unsigned k=y*ED_WIDTH+x;
+        if(l->cells[k]>=ED_KIND_COUNT || l->sprites[k]>=ED_SPR_COUNT ||
+           (x>=width && (l->cells[k]||l->sprites[k]))) return 0;
+    }
+    total=width*ED_HEIGHT;
+    while(i<total) {
+        unsigned k=(i/width)*ED_WIDTH+i%width, c=l->cells[k], s=l->sprites[k], run=1;
+        if(s) {
+            if(pos+2>ED_OLD_CELLS) return 0;
+            if(out) { out[pos]=(uint8_t)(0xc0|s); out[pos+1]=(uint8_t)c; }
+            pos+=2; i++; continue;
+        }
+        while(i+run<total && run<(c?64u:128u)) {
+            unsigned q=((i+run)/width)*ED_WIDTH+(i+run)%width;
+            if(l->cells[q]!=c || l->sprites[q]) break;
+            run++;
+        }
+        if(!c) {
+            if(pos+1>ED_OLD_CELLS) return 0;
+            if(out) out[pos]=(uint8_t)(run-1);
+            pos++;
+        } else if(run==1) {
+            if(pos+1>ED_OLD_CELLS) return 0;
+            if(out) out[pos]=(uint8_t)(0xe0|c);
+            pos++;
+        } else {
+            if(pos+2>ED_OLD_CELLS) return 0;
+            if(out) { out[pos]=(uint8_t)(0x80|(run-1)); out[pos+1]=(uint8_t)c; }
+            pos+=2;
+        }
+        i+=run;
+    }
+    return pos+1;
+}
+int ed_can_encode(const EditorLevel *l) {
+    return l && ed_settings_valid(&l->settings) && (legacy_mode(l) || encode_v6(l,0));
+}
+int ed_encode(const EditorLevel *l, uint8_t out[ED_SAVE_BYTES]) {
+    uint32_t h; unsigned i,x,y,n=0; int version;
+    if(!l || !out || !ed_settings_valid(&l->settings)) return 0;
+    version=legacy_mode(l);
+    if(!version && !encode_v6(l,0)) return 0; /* Do not touch output on failure. */
+    memset(out,0,ED_SAVE_BYTES); memcpy(out,"GDED",4);
+    out[4]=(uint8_t)(version?version:6);
+    if(version==4) {
+        out[5]=ED_OLD_WIDTH; out[6]=ED_HEIGHT;
+        for(y=0;y<ED_HEIGHT;y++) for(x=0;x<ED_OLD_WIDTH;x++) {
+            unsigned old=y*ED_OLD_WIDTH+x, k=y*ED_WIDTH+x;
+            out[8+old]=(uint8_t)(l->cells[k] | (l->sprites[k]<<4));
+        }
+    } else if(version==5) {
+        out[5]=(uint8_t)(l->settings.mode | (l->settings.speed<<3) | (l->settings.mini<<6));
+        out[6]=l->settings.song;
+        for(y=0;y<ED_HEIGHT;y++) for(x=0;x<ED_OLD_WIDTH;x++) {
+            unsigned old=y*ED_OLD_WIDTH+x, k=y*ED_WIDTH+x;
+            out[8+old/2] |= (uint8_t)(l->cells[k] << (4*(old%2)));
+            if(l->sprites[k]) {
+                unsigned e=old | (l->sprites[k]<<9);
+                out[8+ED_OLD_CELLS/2+n*2]=(uint8_t)e;
+                out[8+ED_OLD_CELLS/2+n*2+1]=(uint8_t)(e>>8); n++;
             }
         }
         out[7]=(uint8_t)n;
+    } else {
+        out[5]=(uint8_t)(l->settings.mode | (l->settings.speed<<3) | (l->settings.mini<<6));
+        out[6]=l->settings.song; /* width is encoded in one byte, in 16-column units */
+        out[7]=(uint8_t)(l->width/16);
+        encode_v6(l,out+8);
     }
-    h=checksum(out,8+ED_CELLS);
-    for(i=0;i<4;i++) out[8+ED_CELLS+i]=(uint8_t)(h>>(8*i));
+    h=checksum(out,8+ED_OLD_CELLS);
+    for(i=0;i<4;i++) out[8+ED_OLD_CELLS+i]=(uint8_t)(h>>(8*i));
     return 1;
 }
 int ed_decode(EditorLevel *level, const uint8_t in[ED_SAVE_BYTES]) {
-    uint32_t h, stored=0; unsigned i, version, prev=0;
+    uint32_t h, stored=0; unsigned i, version, prev=0, width=ED_OLD_WIDTH;
     EditorSettings settings={ED_MODE_CUBE,ED_SPEED_X1,0,ED_SONG_STEREOMA};
     if(!level || !in || memcmp(in,"GDED",4)) return 0;
-    version=in[4]; if(version!=1 && version!=2 && version!=4 && version!=5) return 0;
-    if(version!=5 && (in[5]!=ED_WIDTH || in[6]!=ED_HEIGHT || in[7])) return 0;
-    if(version==5) {
+    version=in[4]; if(version!=1 && version!=2 && version!=4 && version!=5 && version!=6) return 0;
+    if(version!=5 && version!=6 && (in[5]!=ED_OLD_WIDTH || in[6]!=ED_HEIGHT || in[7])) return 0;
+    if(version==5 || version==6) {
         settings.mode=in[5]&7; settings.speed=(in[5]>>3)&7; settings.mini=(in[5]>>6)&1;
         settings.song=in[6];
-        if((in[5]&128) || !ed_settings_valid(&settings) || in[7]>ED_V5_MAX_SPRITES) return 0;
+        if((in[5]&128) || !ed_settings_valid(&settings)) return 0;
+        if(version==5 && in[7]>ED_V5_MAX_SPRITES) return 0;
+        if(version==6) { width=(unsigned)in[7]*16; if(width<ED_OLD_WIDTH || width>ED_WIDTH) return 0; }
     }
-    h=checksum(in,8+ED_CELLS);
-    for(i=0;i<4;i++) stored|=(uint32_t)in[8+ED_CELLS+i]<<(8*i);
+    h=checksum(in,8+ED_OLD_CELLS);
+    for(i=0;i<4;i++) stored|=(uint32_t)in[8+ED_OLD_CELLS+i]<<(8*i);
     if(h!=stored) return 0;
-    if(version==5) {
-        for(i=0;i<ED_CELLS;i++) if(((in[8+i/2]>>(4*(i%2)))&15)>=ED_KIND_COUNT) return 0;
-        for(i=0;i<ED_V5_MAX_SPRITES;i++) {
-            unsigned e=in[8+ED_CELLS/2+i*2] | ((unsigned)in[8+ED_CELLS/2+i*2+1]<<8);
-            unsigned index=e&511, kind=(e>>9)&31;
-            if(i<in[7]) {
-                if((e&0xc000) || !kind || kind>=ED_SPR_COUNT || (i && index<=prev)) return 0;
-                prev=index;
-            } else if(e) return 0;
+    if(version==6) {
+        /* First pass validates everything before changing caller's level. */
+        unsigned pos=0, count=0, total=width*ED_HEIGHT;
+        while(count<total) {
+            unsigned t,run=1,c=0,s=0;
+            if(pos>=ED_OLD_CELLS) return 0;
+            t=in[8+pos++];
+            if(t<0x80) run=t+1;
+            else if(t<0xc0) { run=(t&63)+1; if(pos>=ED_OLD_CELLS) return 0; c=in[8+pos++]; if(!c||c>=ED_KIND_COUNT) return 0; }
+            else if(t<0xe0) { s=t&31; if(!s||s>=ED_SPR_COUNT || pos>=ED_OLD_CELLS) return 0; c=in[8+pos++]; if(c>=ED_KIND_COUNT) return 0; }
+            else if(t<0xf0) { c=t&15; if(!c || c>=ED_KIND_COUNT) return 0; }
+            else return 0;
+            if(run>total-count) return 0;
+            count+=run;
         }
-    } else for(i=0;i<ED_CELLS;i++) {
+        for(;pos<ED_OLD_CELLS;pos++) if(in[8+pos]) return 0;
+        ed_clear(level); level->width=(uint16_t)width; level->settings=settings;
+        pos=0; count=0;
+        while(count<total) {
+            unsigned t=in[8+pos++], run=1,c=0,s=0;
+            if(t<0x80) run=t+1;
+            else if(t<0xc0) { run=(t&63)+1; c=in[8+pos++]; }
+            else if(t<0xe0) { s=t&31; c=in[8+pos++]; }
+            else c=t&15;
+            while(run--) { unsigned k=(count/width)*ED_WIDTH+count%width; level->cells[k]=(uint8_t)c; level->sprites[k]=(uint8_t)s; count++; }
+        }
+        return 1;
+    }
+    if(version==5) {
+        for(i=0;i<ED_V5_MAX_SPRITES;i++) {
+            unsigned e=in[8+ED_OLD_CELLS/2+i*2] | ((unsigned)in[8+ED_OLD_CELLS/2+i*2+1]<<8);
+            unsigned index=e&511, kind=(e>>9)&31;
+            if(i<in[7]) { if((e&0xc000) || !kind || kind>=ED_SPR_COUNT || (i && index<=prev)) return 0; prev=index; }
+            else if(e) return 0;
+        }
+    } else for(i=0;i<ED_OLD_CELLS;i++) {
         unsigned c=in[8+i];
         if(version==1 && c>=3) return 0;
         if(version==2 && c>=ED_KIND_COUNT) return 0;
         if(version==4 && ((c&15)>=ED_KIND_COUNT || (c>>4)>=ED_SPR_COUNT)) return 0;
     }
-    for(i=0;i<ED_CELLS;i++) {
-        unsigned c=in[8+i];
-        level->cells[i]=(uint8_t)(version==5 ? (in[8+i/2]>>(4*(i%2)))&15 : version==4 ? c&15 : c);
-        level->sprites[i]=(uint8_t)(version==4 ? c>>4 : 0);
+    ed_clear(level); level->width=ED_OLD_WIDTH; level->settings=settings;
+    for(i=0;i<ED_OLD_CELLS;i++) {
+        unsigned c=in[8+i], k=(i/ED_OLD_WIDTH)*ED_WIDTH+i%ED_OLD_WIDTH;
+        level->cells[k]=(uint8_t)(version==5 ? (in[8+i/2]>>(4*(i%2)))&15 : version==4 ? c&15 : c);
+        level->sprites[k]=(uint8_t)(version==4 ? c>>4 : 0);
     }
     if(version==5) for(i=0;i<in[7];i++) {
-        unsigned e=in[8+ED_CELLS/2+i*2] | ((unsigned)in[8+ED_CELLS/2+i*2+1]<<8);
-        level->sprites[e&511]=(uint8_t)((e>>9)&31);
+        unsigned e=in[8+ED_OLD_CELLS/2+i*2] | ((unsigned)in[8+ED_OLD_CELLS/2+i*2+1]<<8), old=e&511;
+        level->sprites[(old/ED_OLD_WIDTH)*ED_WIDTH+old%ED_OLD_WIDTH]=(uint8_t)((e>>9)&31);
     }
-    level->settings=settings;
     return 1;
 }
 
 int ed_bank_read(const uint8_t *bank, EditorLevel *level, uint32_t *sequence) {
     unsigned i; int zero=1, ff=1;
     uint32_t stored=0, seq=0;
-    /* EditorLevel is 1024 bytes. Keep the validation scratch out of the
+    /* EditorLevel is large. Keep the validation scratch out of the
      * limited GBA stack: this function is also called while the editor loop
      * and bank-selection frames are live. It is not called from interrupts. */
 #if defined(__arm__)
