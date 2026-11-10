@@ -105,19 +105,19 @@ static void draw(unsigned x,unsigned y,unsigned left,unsigned top,unsigned selec
     tte_erase_rect(0,0,240,160);
     if(screen_list) {
         text(0,0,"MIS NIVELES");
-        text(0,8,list_cursor==0?"> NUEVO":"  NUEVO");
+        text(0,8,list_cursor==0?"X NUEVO":"  NUEVO");
         for(int i=0;i<ED_SLOT_COUNT;i++) if(slot_status[i]!=0) {
-            posprintf(line,"%s NIVEL %d %s",list_cursor==i+1?">":" ",i+1,
+            posprintf(line,"%s NIVEL %d %s",list_cursor==i+1?"X":" ",i+1,
                       slot_status[i]<0?"BLOQUEADO":"VER");
             text(0,16+i*16,line);
         }
-        if(legacy_valid || legacy_unknown) text(0,112,list_cursor==7?"> ANTERIOR VER":"  ANTERIOR VER");
+        if(legacy_valid || legacy_unknown) text(0,112,list_cursor==7?"X ANTERIOR VER":"  ANTERIOR VER");
         text(0,144,"A VER/NUEVO B TITULO"); text(0,152,status); return;
     }
     if(screen_detail) {
         posprintf(line,active_slot<0?"NIVEL ANTERIOR":"NIVEL %d",active_slot+1); text(0,0,line);
-        text(0,24,detail_cursor==0?"> JUGAR NO DISPONIBLE":"  JUGAR NO DISPONIBLE");
-        text(0,48,detail_cursor==1?"> EDITAR":"  EDITAR");
+        text(0,24,detail_cursor==0?"X JUGAR NO DISPONIBLE":"  JUGAR NO DISPONIBLE");
+        text(0,48,detail_cursor==1?"X EDITAR":"  EDITAR");
         if(active_slot<0) text(0,80,"START GUARDA COPIA");
         else if(!slot_write[active_slot]) text(0,80,"GUARDADO BLOQUEADO");
         text(0,128,"A ELEGIR B VOLVER"); text(0,144,status); return;
