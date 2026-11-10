@@ -104,6 +104,12 @@ void title_screen_loop() {
         obj_copy(oam_mem, shadow_oam, 128);
         obj_aff_copy(obj_aff_mem, obj_aff_buffer, 32);
 
+        // Prototype editor (down on title screen)
+        if (key_hit(KEY_DOWN)) {
+            game_state = STATE_EDITOR;
+            break;
+        }
+
         // Level select
         if (key_hit(KEY_A) | key_hit(KEY_START)) {
             custom_levels = FALSE;
