@@ -36,6 +36,39 @@ int ed_menu_input(int *screen, unsigned input) {
     }
     return ED_ACTION_NONE;
 }
+unsigned ed_edit_buttons_step(EditorButtons *s, unsigned down, unsigned hit,
+                              int in_grid, int flush) {
+    const unsigned buttons = ED_INPUT_A | ED_INPUT_B;
+    unsigned out = 0, other;
+    down &= buttons; hit &= buttons;
+    if (s->blocked) {
+        if (!down) s->blocked = 0;
+        return 0;
+    }
+    if (!in_grid) { s->pending = s->age = 0; return 0; }
+    if (s->pending) {
+        other = buttons ^ s->pending;
+        if ((down & s->pending) && (down & hit & other)) {
+            s->pending = s->age = 0; s->blocked = 1;
+            return ED_BUTTON_CHORD;
+        }
+        if (!(down & s->pending) || ++s->age >= ED_CHORD_WINDOW_FRAMES || flush) {
+            out = s->pending; s->pending = s->age = 0;
+        }
+    }
+    if (!s->pending && hit) {
+        if ((hit & down) == buttons) {
+            s->blocked = 1;
+            return out | ED_BUTTON_CHORD;
+        }
+        /* A button that was already held (or inherited from a menu) must not
+         * become a chord after its single action has committed. */
+        if (down & (buttons ^ hit)) out |= hit;
+        else if (flush) out |= hit;
+        else { s->pending = hit; s->age = 0; }
+    }
+    return out;
+}
 void ed_clear(EditorLevel *level) {
     memset(level, 0, sizeof(*level));
     level->settings.speed = ED_SPEED_X1;
