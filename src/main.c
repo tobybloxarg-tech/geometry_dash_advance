@@ -11,6 +11,7 @@
 #include "sound_test.h"
 #include "icon_kit.h"
 #include "editor.h"
+#include "editor_play.h"
 #include "math.h"
 
 void game_loop();
@@ -334,13 +335,14 @@ void level_loop() {
             if (paused_routines()) {
                 mmStop();
                 mmEffect(SFX_LEVEL_EXIT);
-                game_state = STATE_LEVEL_SELECT;      
+                game_state = ed_play_active() ? STATE_EDITOR : STATE_LEVEL_SELECT;
                 memcpy32(palette_buffer, pal_bg_mem, 256);
                 clear_checkpoints();
                 in_practice_mode = FALSE;
                 screen_mirrored = FALSE;
 
                 fade_out();
+                editor_play_finish();
 
                 mmStart(MOD_MENU, MM_PLAY_LOOP);
                 return;
@@ -348,11 +350,12 @@ void level_loop() {
         }
 
         if (cutscene_frame == EXIT_CUTSCENE_FRAME) {
-            game_state = STATE_LEVEL_SELECT;      
+            game_state = ed_play_active() ? STATE_EDITOR : STATE_LEVEL_SELECT;
             memcpy32(palette_buffer, pal_bg_mem, 256);
             fade_out();
             mmStart(MOD_MENU, MM_PLAY_LOOP);
             clear_checkpoints();
+            editor_play_finish();
             complete_cutscene = FALSE;        
             cutscene_frame = 0;
             screen_mirrored = FALSE;
@@ -363,16 +366,16 @@ void level_loop() {
         }
         
 #ifdef DEBUG
-        if (key_hit(KEY_RIGHT)) {
+        if (!ed_play_active() && key_hit(KEY_RIGHT)) {
             debug_mode ^= 1;
             hitbox_display = 0;
         }
 
-        if (key_hit(KEY_LEFT)) {
+        if (!ed_play_active() && key_hit(KEY_LEFT)) {
             noclip ^= 1;
         }
 
-        if (debug_mode) {
+        if (!ed_play_active() && debug_mode) {
             if (key_hit(KEY_DOWN)) {
                 hitbox_display ^= 1;
             }
@@ -456,9 +459,9 @@ u32 paused_routines() {
 
         // Practice mode
 #ifdef INCLUDE_ENDLESS
-        if (key_hit(KEY_SELECT) && loaded_level_id != endless_ID) {
+        if (!ed_play_active() && key_hit(KEY_SELECT) && loaded_level_id != endless_ID) {
 #else
-        if (key_hit(KEY_SELECT)) {
+        if (!ed_play_active() && key_hit(KEY_SELECT)) {
 #endif
             clear_checkpoints();
             

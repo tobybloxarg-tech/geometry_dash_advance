@@ -4,6 +4,18 @@ const uint16_t ed_metatile[ED_KIND_COUNT] = {
     0x00, 0x02, 0x01, 0x2a, 0x03, 0x2b, 0x2c, 0x2d, 0x2e,
     0x17, 0x18, 0x19, 0x1a, 0x1b, 0x22, 0x23
 };
+/* Stable codes above map to the stock engine's ObjTypes, not Tiled GIDs. */
+const uint16_t ed_sprite_type[ED_SPR_COUNT] = {
+    0, 9, 16, 18, 160, 163, 164, 1, 2, 26, 57, 114, 14, 15, 28, 29
+};
+int ed_sprite_put(EditorLevel *level, unsigned x, unsigned y, unsigned kind) {
+    if (x >= ED_WIDTH || y >= ED_HEIGHT || kind >= ED_SPR_COUNT) return 0;
+    level->sprites[y * ED_WIDTH + x] = (uint8_t)kind; return 1;
+}
+int ed_sprite_get(const EditorLevel *level, unsigned x, unsigned y) {
+    if (x >= ED_WIDTH || y >= ED_HEIGHT) return -1;
+    return level->sprites[y * ED_WIDTH + x];
+}
 int ed_menu_input(int *screen, unsigned input) {
     switch (*screen) {
     case ED_SCREEN_EDIT:
@@ -24,7 +36,7 @@ int ed_menu_input(int *screen, unsigned input) {
     }
     return ED_ACTION_NONE;
 }
-void ed_clear(EditorLevel *level) { memset(level->cells, 0, sizeof(level->cells)); }
+void ed_clear(EditorLevel *level) { memset(level, 0, sizeof(*level)); }
 int ed_put(EditorLevel *level, unsigned x, unsigned y, unsigned kind) {
     if (x >= ED_WIDTH || y >= ED_HEIGHT || kind >= ED_KIND_COUNT) return 0;
     level->cells[y * ED_WIDTH + x] = (uint8_t)kind; return 1;
@@ -36,22 +48,35 @@ int ed_get(const EditorLevel *level, unsigned x, unsigned y) {
 static uint32_t checksum(const uint8_t *p, size_t n) {
     uint32_t h = 2166136261u; while (n--) { h ^= *p++; h *= 16777619u; } return h;
 }
+/* Version 4 packs two 4-bit stable symbols into each cell, retaining the
+ * original record and bank lengths and addresses. Old readers reject v4. */
 void ed_encode(const EditorLevel *level, uint8_t out[ED_SAVE_BYTES]) {
-    const uint8_t header[8] = {'G','D','E','D',2,ED_WIDTH,ED_HEIGHT,0};
-    memcpy(out,header,8); memcpy(out+8,level->cells,ED_CELLS);
-    uint32_t h = checksum(out, 8+ED_CELLS);
-    for (unsigned i=0;i<4;i++) out[8+ED_CELLS+i]=(uint8_t)(h>>(8*i));
+    const uint8_t header[8] = {'G','D','E','D',4,ED_WIDTH,ED_HEIGHT,0};
+    uint32_t h; unsigned i;
+    memcpy(out,header,8);
+    for (i=0;i<ED_CELLS;i++) out[8+i] = (uint8_t)(level->cells[i] | (level->sprites[i]<<4));
+    h = checksum(out, 8+ED_CELLS);
+    for (i=0;i<4;i++) out[8+ED_CELLS+i]=(uint8_t)(h>>(8*i));
 }
 int ed_decode(EditorLevel *level, const uint8_t in[ED_SAVE_BYTES]) {
-    const uint8_t header1[8] = {'G','D','E','D',1,ED_WIDTH,ED_HEIGHT,0};
-    const uint8_t header2[8] = {'G','D','E','D',2,ED_WIDTH,ED_HEIGHT,0};
-    int old = !memcmp(in,header1,8);
-    if (!old && memcmp(in,header2,8)) return 0;
-    uint32_t h=checksum(in,8+ED_CELLS), stored=0;
-    for (unsigned i=0;i<4;i++) stored|=(uint32_t)in[8+ED_CELLS+i]<<(8*i);
+    uint32_t h, stored=0; unsigned i, version;
+    if (memcmp(in,"GDED",4) || in[5]!=ED_WIDTH || in[6]!=ED_HEIGHT || in[7]) return 0;
+    version=in[4]; if(version!=1 && version!=2 && version!=4) return 0;
+    h=checksum(in,8+ED_CELLS);
+    for (i=0;i<4;i++) stored|=(uint32_t)in[8+ED_CELLS+i]<<(8*i);
     if (h!=stored) return 0;
-    for (unsigned i=0;i<ED_CELLS;i++) if (in[8+i]>=(old ? 3u : ED_KIND_COUNT)) return 0;
-    memcpy(level->cells,in+8,ED_CELLS); return 1;
+    for (i=0;i<ED_CELLS;i++) {
+        unsigned c=in[8+i];
+        if (version==1 && c>=3) return 0;
+        if (version==2 && c>=ED_KIND_COUNT) return 0;
+        if (version==4 && ((c & 15)>=ED_KIND_COUNT || (c>>4)>=ED_SPR_COUNT)) return 0;
+    }
+    for (i=0;i<ED_CELLS;i++) {
+        unsigned c=in[8+i];
+        level->cells[i]=(uint8_t)(version==4 ? c&15 : c);
+        level->sprites[i]=(uint8_t)(version==4 ? c>>4 : 0);
+    }
+    return 1;
 }
 
 int ed_bank_read(const uint8_t *bank, EditorLevel *level, uint32_t *sequence) {

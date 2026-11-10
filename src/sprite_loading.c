@@ -9,6 +9,7 @@
 #include "color.h"
 #include "../graphics/includes.h"
 #include "level_routines.h"
+#include "editor_play.h"
 
 
 u16 *sprite_pointer;
@@ -73,14 +74,28 @@ void load_objects(u32 load_chr, u32 loading_level) {
     if (load_chr) old_next_free_tile_id = next_free_tile_id;
     for (s32 index = 0; index < MAX_OBJECTS; index++) {
         if (object_buffer[index].occupied == FALSE) {
-            if ((*sprite_pointer & 0xff000000) != 0xff000000) {
+            /* Stock exporter writes one terminal byte, not a 32-bit word.
+             * Inspect only that byte; all shipped deltas have low byte != ff.
+             * Editor records additionally have an explicit in-bounds limit. */
+            if (ed_play_active()) {
+                /* A corrupted/truncated editor record stops the stream. */
+                if (last_sprite_x > (ED_WIDTH - 1) * 16 ||
+                    !ed_play_record_valid(sprite_pointer, (u32)last_sprite_x)) break;
+            } else if (*(const u8 *)sprite_pointer == 0xff) break;
+            {
                 struct Object new_object = { 0 };
 
                 // Get x position
                 u16 delta_x = *sprite_pointer;
 
                 u32 absolute_x = last_sprite_x + delta_x;
-                s64 relative_x = absolute_x - (scroll_x >> SUBPIXEL_BITS);
+                /* The stock subtraction promotes to unsigned and wraps for
+                 * objects left of scroll. Editor x=0 must still load. */
+                s64 relative_x;
+                if (ed_play_active())
+                    relative_x = (s64)absolute_x - (s64)(scroll_x >> SUBPIXEL_BITS);
+                else
+                    relative_x = absolute_x - (scroll_x >> SUBPIXEL_BITS);
                 
                 // Don't load if offscreen
                 if (load_chr && relative_x > 280) break;

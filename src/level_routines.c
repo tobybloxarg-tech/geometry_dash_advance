@@ -1,3 +1,4 @@
+#include <string.h>
 #include "level_routines.h"
 #include "memory.h"
 #include "main.h"
@@ -12,6 +13,7 @@
 #endif
 #include "icon_kit.h"
 #include "math.h"
+#include "editor_play.h"
 
 // RLE variables
 u16 value[LEVEL_LAYERS];
@@ -67,7 +69,7 @@ void decompress_first_screen() {
         curr_column_absolute = 0;
         seam_x = scroll_x >> SUBPIXEL_BITS;
         // Init RLE values for this layer
-        unpack_rle_packet(layer);
+        if (!ed_play_active()) unpack_rle_packet(layer);
 
         for (s32 i = 0; i < 16; i++) {
             decompress_column(layer);
@@ -172,7 +174,7 @@ void increment_column() {
     curr_column_absolute++;
     curr_column_relative++;
 #ifdef INCLUDE_ENDLESS
-    if (loaded_level_id == endless_ID) {
+    if (!ed_play_active() && loaded_level_id == endless_ID) {
         u32 part_width;
 
         if (curr_endless_part_id >= 0) {
@@ -347,6 +349,14 @@ void unpack_overflow_check(u32 layer, u32 bits_left_check) {
 }
 
 ARM_CODE void decompress_column(u32 layer) {
+    if (ed_play_active()) {
+        /* Editor rows are top-to-bottom, immediately above the normal floor.
+         * curr_column_absolute is not the wrapping 32-column buffer index. */
+        for (u32 y = 0; y < ED_HEIGHT; ++y)
+            level_buffer[layer][curr_column + ((GROUND_HEIGHT - ED_HEIGHT + y) * LEVEL_BUFFER_WIDTH)] =
+                ed_play_metatile(layer, curr_column_absolute, y);
+        return;
+    }
     // RLE decompress an entire column of curr_level_height blocks
     for (s32 i = 0; i < curr_level_height; i++) {
         if (length[layer] < 0) {
@@ -390,6 +400,14 @@ void set_initial_color(COLOR bg_color, COLOR ground_color, COLOR col1_color, COL
 }
 
 void reset_variables() {
+    /* Editor attempts always start as a clean cube, even after portals or
+     * a previous stock run. Restore the already-selected spawn position. */
+    if (ed_play_active()) {
+        s32 spawn_y = player_1.player_y;
+        memset(&player_1, 0, sizeof player_1);
+        player_1.player_y = spawn_y;
+        player_1.gamemode = GAMEMODE_CUBE;
+    }
     player_1.player_x = -0x80000;  
     player_1.relative_player_x = 0;
     player_1.player_y_speed = 0;
@@ -471,6 +489,12 @@ void reset_variables() {
         coin_buffer[index] = 0;
     }
 
+    if (ed_play_active()) {
+        /* Discard pending uploads tied to the previous attempt/session. */
+        loaded_object_buffer_offset = 0;
+        unloaded_object_buffer_offset = 0;
+    }
+
     // Empty chr slots
     for (u32 index = 0; index < MAX_CHR_SLOTS; index++) {
         object_buffer[index].occupied = FALSE;
@@ -501,12 +525,24 @@ const u16 endless_bg_g_colors[] = {
 };
 
 void load_level(u32 level_ID) {
-    // Set level pointers
-    level_pointer[0] = (u32*) level_defines[level_ID][L1_DATA_INDEX];
-    level_pointer[1] = (u32*) level_defines[level_ID][L2_DATA_INDEX];
-    sprite_pointer   = (u16*) level_defines[level_ID][SPRITE_DATA_INDEX];
-    
-    u32 *properties_pointer = (u32*) level_defines[level_ID][LEVEL_PROPERTIES_INDEX];
+    /* A private finite cube level; no stock level table is consulted for
+     * editor sessions. Columns and validated sprite records come from RAM. */
+    static const u32 editor_properties[] = {
+        0x7ce5, 0x6440, 0x7fff, 0x7fff, 0x7fff, 0x7fff, 0x7fff,
+        0, 1, ED_HEIGHT, ED_PLAY_WIDTH, MOD_STEREOMA,
+        0, 0, 0, 0, 0, 0
+    };
+    const u32 *properties_pointer;
+    if (ed_play_active()) {
+        level_pointer[0] = level_pointer[1] = 0;
+        sprite_pointer = ed_play_sprite_stream();
+        properties_pointer = editor_properties;
+    } else {
+        level_pointer[0] = (u32*) level_defines[level_ID][L1_DATA_INDEX];
+        level_pointer[1] = (u32*) level_defines[level_ID][L2_DATA_INDEX];
+        sprite_pointer = (u16*) level_defines[level_ID][SPRITE_DATA_INDEX];
+        properties_pointer = (const u32*) level_defines[level_ID][LEVEL_PROPERTIES_INDEX];
+    }
 
     // Get level variables
     COLOR bg_color = properties_pointer[BG_COLOR_INDEX];
@@ -525,7 +561,7 @@ void load_level(u32 level_ID) {
     u32 ground_type = properties_pointer[LEVEL_GROUND_TYPE];
 
 #ifdef INCLUDE_ENDLESS
-    if (level_ID == endless_ID) {
+    if (!ed_play_active() && level_ID == endless_ID) {
         u16 random_color = endless_bg_g_colors[qran() & 0x7];
         bg_color = random_color;
         ground_color = random_color;
@@ -995,6 +1031,13 @@ void draw_attempt_counter() {
 }
 
 u32 get_level_progress() {
+    if (ed_play_active()) {
+        s64 pixels = curr_player.player_x >> SUBPIXEL_BITS;
+        u32 finish = (ED_PLAY_WIDTH << 4) - 0x98;
+        if (pixels <= 0) return 0;
+        if ((u64)pixels >= finish || complete_cutscene) return 100;
+        return (u32)pixels * 100 / finish;
+    }
 #ifdef INCLUDE_ENDLESS
     if (loaded_level_id == endless_ID) {
         if (curr_player.player_x < 0) return 0;
@@ -1016,6 +1059,7 @@ u32 get_level_progress() {
 }
 
 void set_new_best(u32 new_best, u32 mode) {
+    if (ed_play_active()) return; /* Never write stock records for editor play. */
     // Handle endless distance record
 #ifdef INCLUDE_ENDLESS
     if (loaded_level_id == endless_ID) {
