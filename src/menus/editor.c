@@ -6,6 +6,7 @@
 #include "level_select.h"
 #include "editor.h"
 #include "editor_core.h"
+#include "metatiles.h"
 #include "tonc_tte.h"
 #include "pusab.h"
 
