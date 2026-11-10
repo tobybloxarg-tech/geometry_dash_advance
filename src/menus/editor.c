@@ -161,10 +161,12 @@ static void draw(unsigned x,unsigned y,unsigned left,unsigned top,unsigned selec
         posprintf(line,"%s MINI %s",settings_cursor==2?"X":" ",a->mini?"SI":"NO"); text(0,56,line);
         posprintf(line,"%s MUSICA",settings_cursor==3?"X":" "); text(0,72,line);
         text(8,88,song_names[a->song]);
+        posprintf(line,"%s LARGO %d",settings_cursor==4?"X":" ",editor_level.width); text(0,104,line);
+        if(settings_cursor==4 && editor_level.width<ED_WIDTH) text(0,112,"DER AMPLIAR");
         text(0,128,"ARRIBA ABAJO ELEGIR"); text(0,136,"IZQ DER CAMBIAR B VOLVER");
         text(0,152,status); return;
     }
-    posprintf(line,"EDITOR X%02d Y%d L/R TIPO",x+1,y+1); text(0,0,line);
+    posprintf(line,"X%d/%d Y%d L/R TIPO",x+1,editor_level.width,y+1); text(0,0,line);
     for(unsigned r=0;r<VIEW_H;r++) for(unsigned c=0;c<VIEW_W;c++) {
         metatile_at(c*2,2+r*2,(unsigned)ed_get(&editor_level,left+c,top+r));
         sprite_at(c*2,2+r*2,(unsigned)ed_sprite_get(&editor_level,left+c,top+r));
@@ -286,16 +288,20 @@ void editor_loop(void) {
             if(key_hit(KEY_B) && !buttons.blocked) { screen=ED_SCREEN_MENU; status=""; changed=1; }
             else {
                 EditorSettings before=editor_level.settings;
-                if(key_hit(KEY_UP)) { settings_cursor=(settings_cursor+3)%4; changed=1; }
-                if(key_hit(KEY_DOWN)) { settings_cursor=(settings_cursor+1)%4; changed=1; }
+                unsigned width_before=editor_level.width;
+                if(key_hit(KEY_UP)) { settings_cursor=(settings_cursor+4)%5; changed=1; }
+                if(key_hit(KEY_DOWN)) { settings_cursor=(settings_cursor+1)%5; changed=1; }
                 int delta=key_hit(KEY_LEFT)?-1:key_hit(KEY_RIGHT)?1:0;
                 if(delta) {
                     if(settings_cursor==0) editor_level.settings.mode=(before.mode+ED_MODE_COUNT+delta)%ED_MODE_COUNT;
                     else if(settings_cursor==1) editor_level.settings.speed=(before.speed+ED_SPEED_COUNT+delta)%ED_SPEED_COUNT;
                     else if(settings_cursor==2) editor_level.settings.mini^=1;
-                    else editor_level.settings.song=(before.song+ED_SONG_COUNT+delta)%ED_SONG_COUNT;
-                    if(!ed_can_encode(&editor_level)) { editor_level.settings=before; status="MAXIMO 128 OBJETOS"; }
-                    else { dirty=1; status="SIN GUARDAR"; }
+                    else if(settings_cursor==3) editor_level.settings.song=(before.song+ED_SONG_COUNT+delta)%ED_SONG_COUNT;
+                    else if(delta>0) editor_level.width=ED_WIDTH;
+                    /* Shortening would discard cells; only the legacy width is
+                     * retained automatically, never truncate an existing grid. */
+                    if(!ed_can_encode(&editor_level)) { editor_level.settings=before; editor_level.width=width_before; status="SIN ESPACIO EN NIVEL"; }
+                    else if(settings_cursor!=4 || editor_level.width!=width_before) { dirty=1; status="SIN GUARDAR"; }
                     changed=1;
                 }
             }
@@ -309,8 +315,18 @@ void editor_loop(void) {
             else if(edit_buttons & ED_BUTTON_CHORD) {
                 screen=ED_SCREEN_SETTINGS; settings_cursor=0; status=""; changed=1;
             } else {
-                if(key_hit(KEY_LEFT)&&x>0) { x--; changed=1; }
-                if(key_hit(KEY_RIGHT)&&x+1<ED_WIDTH) { x++; changed=1; }
+                /* Hold a direction to travel the long grid; first movement is instant. */
+                static unsigned move_age;
+                int horiz=key_is_down(KEY_RIGHT)?1:key_is_down(KEY_LEFT)?-1:0;
+                if(!horiz) move_age=0;
+                else {
+                    if(key_hit(KEY_LEFT)||key_hit(KEY_RIGHT)) move_age=0;
+                    if(move_age==0 || (move_age>=15 && move_age%3==0)) {
+                        if(horiz<0 && x>0) { x--; changed=1; }
+                        if(horiz>0 && x+1<editor_level.width) { x++; changed=1; }
+                    }
+                    if(move_age<60000) move_age++;
+                }
                 if(key_hit(KEY_UP)&&y>0) { y--; changed=1; }
                 if(key_hit(KEY_DOWN)&&y+1<ED_HEIGHT) { y++; changed=1; }
                 if(key_hit(KEY_L)) { selected=(selected+BRUSH_COUNT-1)%BRUSH_COUNT; changed=1; }
@@ -320,13 +336,21 @@ void editor_loop(void) {
                 if(hit & ED_INPUT_A) { ax=x; ay=y; aselected=selected; }
                 if(hit & ED_INPUT_B) { bx=x; by=y; bselected=selected; }
                 if(edit_buttons & ED_INPUT_A) {
-                    if(aselected<TERRAIN_BRUSH_COUNT) ed_put(&editor_level,ax,ay,brushes[aselected]);
+                    if(aselected<TERRAIN_BRUSH_COUNT) {
+                        int old=ed_get(&editor_level,ax,ay);
+                        ed_put(&editor_level,ax,ay,brushes[aselected]);
+                        if(!ed_can_encode(&editor_level)) {
+                            ed_put(&editor_level,ax,ay,(unsigned)old);
+                            status="SIN ESPACIO EN NIVEL"; changed=1;
+                            goto placement_done;
+                        }
+                    }
                     else {
                         int old=ed_sprite_get(&editor_level,ax,ay);
                         ed_sprite_put(&editor_level,ax,ay,aselected-TERRAIN_BRUSH_COUNT+1);
                         if(!ed_can_encode(&editor_level)) {
                             ed_sprite_put(&editor_level,ax,ay,(unsigned)old);
-                            status="MAXIMO 128 OBJETOS"; changed=1;
+                            status="SIN ESPACIO EN NIVEL"; changed=1;
                             goto placement_done;
                         }
                     }
@@ -334,9 +358,15 @@ void editor_loop(void) {
 placement_done: ;
                 }
                 if(edit_buttons & ED_INPUT_B) {
+                    /* Removing can split a run and increase encoded size. */
+                    int old=bselected<TERRAIN_BRUSH_COUNT ? ed_get(&editor_level,bx,by) : ed_sprite_get(&editor_level,bx,by);
                     if(bselected<TERRAIN_BRUSH_COUNT) ed_put(&editor_level,bx,by,ED_EMPTY);
                     else ed_sprite_put(&editor_level,bx,by,ED_SPR_EMPTY);
-                    dirty=1; status="SIN GUARDAR"; changed=1;
+                    if(!ed_can_encode(&editor_level)) {
+                        if(bselected<TERRAIN_BRUSH_COUNT) ed_put(&editor_level,bx,by,(unsigned)old);
+                        else ed_sprite_put(&editor_level,bx,by,(unsigned)old);
+                        status="SIN ESPACIO EN NIVEL"; changed=1;
+                    } else { dirty=1; status="SIN GUARDAR"; changed=1; }
                 }
                 if(key_hit(KEY_START)) {
                     if(active_slot<0 && legacy_copy) {
