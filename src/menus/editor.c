@@ -1,4 +1,4 @@
-/* Multi-slot visual editor. Custom gameplay is not implemented. */
+/* Multi-slot visual editor. Play uses a validated snapshot of a saved level. */
 #include <tonc.h>
 #include <string.h>
 #include "posprintf.h"
@@ -6,9 +6,11 @@
 #include "level_select.h"
 #include "editor.h"
 #include "editor_core.h"
+#include "editor_play.h"
 #include "metatiles.h"
 #include "tonc_tte.h"
 #include "pusab.h"
+#include "editor_sprite_icons.h"
 
 #define EDITOR_SRAM_ADDR 0x6000
 #define BANK_BASE 0x6300
@@ -72,11 +74,16 @@ static const u8 brushes[] = { ED_BLOCK, ED_DARK, ED_CHECK, ED_SLAB_UP,
     ED_SLAB_DOWN, ED_SLAB_LEFT, ED_SLAB_RIGHT, ED_SPIKE, ED_SPIKE_DOWN,
     ED_SPIKE_RIGHT, ED_SPIKE_LEFT, ED_SMALL_UP, ED_SMALL_DOWN,
     ED_MEDIUM_UP, ED_MEDIUM_DOWN };
-#define BRUSH_COUNT (sizeof(brushes)/sizeof(brushes[0]))
+#define TERRAIN_BRUSH_COUNT (sizeof(brushes)/sizeof(brushes[0]))
+#define BRUSH_COUNT (TERRAIN_BRUSH_COUNT + ED_SPR_COUNT - 1)
 static const char *names[] = {"VACIO","BLOQUE","PINCHO","BLOQUE OSCURO",
     "BLOQUE CUADROS","LOSA ARRIBA","LOSA ABAJO","LOSA IZQ","LOSA DER",
     "PINCHO ABAJO","PINCHO DER","PINCHO IZQ","PINCHO CHICO","CHICO INV",
     "PINCHO MEDIO","MEDIO INV"};
+static const char *sprite_names[] = {"", "ORBE AMARILLO", "ORBE AZUL", "ORBE ROSA",
+    "ORBE VERDE", "ORBE NEGRO", "ORBE ROJO", "PORTAL NAVE", "PORTAL CUBO",
+    "PORTAL BOLA", "PORTAL OVNI", "PORTAL ONDA", "GRAVEDAD AZUL",
+    "GRAVEDAD AMARILLA", "PORTAL MINI", "PORTAL GRANDE"};
 static void text(int x,int y,const char *s) { tte_set_pos(x,y); tte_write(s); }
 /* CBB1 holds the first 128 game tiles; 128..131 are editor grid quadrants. */
 static void metatile_at(unsigned col, unsigned row, unsigned kind) {
@@ -90,6 +97,13 @@ static void metatile_at(unsigned col, unsigned row, unsigned kind) {
         se_mem[28][base+32]=m[2]; se_mem[28][base+33]=m[3];
     }
 }
+/* Icons mark the object's anchor; collision artwork can extend beyond it. */
+static void sprite_at(unsigned col, unsigned row, unsigned kind) {
+    unsigned base=row*32+col, tile=8+(kind-1)*4;
+    if(!kind) return;
+    se_mem[26][base]=0x3000|tile; se_mem[26][base+1]=0x3000|(tile+1);
+    se_mem[26][base+32]=0x3000|(tile+2); se_mem[26][base+33]=0x3000|(tile+3);
+}
 /* Transparent 16x16 outline overlaid independently of object artwork. */
 static void outline(unsigned col,unsigned row) {
     unsigned b=row*32+col;
@@ -102,6 +116,7 @@ static void draw(unsigned x,unsigned y,unsigned left,unsigned top,unsigned selec
     memset32(&se_mem[28][0],0,sizeof(SCREENBLOCK)/4);
     /* Tile 4 is fully transparent, so 0..3 can be the cursor quadrants. */
     memset32(&se_mem[29][0],0x00040004,sizeof(SCREENBLOCK)/4);
+    memset32(&se_mem[26][0],0x00040004,sizeof(SCREENBLOCK)/4);
     tte_erase_rect(0,0,240,160);
     if(screen_list) {
         text(0,0,"MIS NIVELES");
@@ -116,7 +131,7 @@ static void draw(unsigned x,unsigned y,unsigned left,unsigned top,unsigned selec
     }
     if(screen_detail) {
         posprintf(line,active_slot<0?"NIVEL ANTERIOR":"NIVEL %d",active_slot+1); text(0,0,line);
-        text(0,24,detail_cursor==0?"X JUGAR NO DISPONIBLE":"  JUGAR NO DISPONIBLE");
+        text(0,24,detail_cursor==0?"X JUGAR":"  JUGAR");
         text(0,48,detail_cursor==1?"X EDITAR":"  EDITAR");
         if(active_slot<0) text(0,80,"START GUARDA COPIA");
         else if(!slot_write[active_slot]) text(0,80,"GUARDADO BLOQUEADO");
@@ -126,17 +141,21 @@ static void draw(unsigned x,unsigned y,unsigned left,unsigned top,unsigned selec
         text(0,0,"MENU EDITOR"); text(0,16,"B VOLVER AL EDITOR");
         text(0,32,"START VOLVER A LISTA");
         text(0,64,"CAMBIOS SIN GUARDAR"); text(0,80,"SE PERDERAN AL SALIR");
-        text(0,112,"NIVELES NO JUGABLES"); return;
+        text(0,112,"JUGAR DESDE LA LISTA"); return;
     }
-    posprintf(line,"EDITOR X%02d Y%d NO JUGABLE",x+1,y+1); text(0,0,line);
-    for(unsigned r=0;r<VIEW_H;r++) for(unsigned c=0;c<VIEW_W;c++)
+    posprintf(line,"EDITOR X%02d Y%d",x+1,y+1); text(0,0,line);
+    for(unsigned r=0;r<VIEW_H;r++) for(unsigned c=0;c<VIEW_W;c++) {
         metatile_at(c*2,2+r*2,(unsigned)ed_get(&editor_level,left+c,top+r));
+        sprite_at(c*2,2+r*2,(unsigned)ed_sprite_get(&editor_level,left+c,top+r));
+    }
     outline((x-left)*2,2+(y-top)*2);
-    text(0,112,names[brushes[selected]]);
+    text(0,112,selected<TERRAIN_BRUSH_COUNT ? names[brushes[selected]] : sprite_names[selected-TERRAIN_BRUSH_COUNT+1]);
     /* Visible category strip, up to seven actual 16x16 metatiles per page. */
     unsigned start=(selected/7)*7;
-    for(unsigned i=0;i<7 && start+i<BRUSH_COUNT;i++)
-        metatile_at(i*3,16,brushes[start+i]);
+    for(unsigned i=0;i<7 && start+i<BRUSH_COUNT;i++) {
+        if(start+i<TERRAIN_BRUSH_COUNT) metatile_at(i*3,16,brushes[start+i]);
+        else sprite_at(i*3,16,start+i-TERRAIN_BRUSH_COUNT+1);
+    }
     outline((selected-start)*3,16);
     text(0,144,"L/R TIPO A PONER B BORRAR"); text(0,152,status);
 }
@@ -145,10 +164,12 @@ void editor_loop(void) {
     int screen=ED_SCREEN_EDIT; const char *status="";
     screen_list=1; screen_detail=0; list_cursor=detail_cursor=0; active_slot=-1; dirty=legacy_copy=0;
     refresh_slots();
-    REG_DISPCNT=DCNT_MODE0 | DCNT_BG0 | DCNT_BG1 | DCNT_BG2;
+    REG_DISPCNT=DCNT_MODE0 | DCNT_BG0 | DCNT_BG1 | DCNT_BG2 | DCNT_BG3;
     REG_BLDCNT=0; REG_MOSAIC=0;
     REG_BG0CNT=BG_CBB(2)|BG_SBB(29)|BG_REG_32x32|BG_PRIO(0);
     REG_BG1CNT=BG_CBB(1)|BG_SBB(28)|BG_REG_32x32|BG_PRIO(2);
+    REG_BG3CNT=BG_CBB(2)|BG_SBB(26)|BG_REG_32x32|BG_PRIO(1);
+    REG_BG3HOFS=REG_BG3VOFS=0;
     REG_BG0HOFS=REG_BG0VOFS=REG_BG1HOFS=REG_BG1VOFS=REG_BG2HOFS=REG_BG2VOFS=0;
     memset32(palette_buffer,0,256);
     memcpy16(palette_buffer,blockPalette,16);
@@ -182,6 +203,8 @@ void editor_loop(void) {
         tile_mem[2][2].data[r]=(r==7)?0xffffffff:0x0000000f;
         tile_mem[2][3].data[r]=(r==7)?0xffffffff:0xf0000000;
     }
+    memcpy32(&tile_mem[2][8],editor_sprite_tiles,sizeof(editor_sprite_tiles)/4);
+    memcpy16(&palette_buffer[48],editor_sprite_palette,16);
     /* Cursor tiles use palette 1. */
     palette_buffer[17]=0x5000; palette_buffer[18]=0x7e80; palette_buffer[31]=0x03ff;
     memcpy32(pal_bg_mem,palette_buffer,256);
@@ -215,7 +238,11 @@ void editor_loop(void) {
             if(key_hit(KEY_UP)||key_hit(KEY_DOWN)) { detail_cursor^=1; changed=1; }
             if(key_hit(KEY_B)) { screen_detail=0; screen_list=1; status=""; changed=1; }
             else if(key_hit(KEY_A)) {
-                if(detail_cursor==0) status="JUGAR NO DISPONIBLE";
+                if(detail_cursor==0) {
+                    if(!load_slot(active_slot)) status="ERROR AL LEER NIVEL";
+                    else if(editor_play_start(&editor_level)) return;
+                    else status=ed_play_error()==ED_PLAY_TOO_MANY ? "MAXIMO 16 OBJETOS" : "NIVEL INVALIDO";
+                }
                 else if(load_slot(active_slot)) { screen_detail=0; screen=ED_SCREEN_EDIT; dirty=0; legacy_copy=(active_slot<0);
                     x=y=left=top=selected=0; status=active_slot<0?"START GUARDA COPIA":"START GUARDAR SELECT MENU"; }
                 else status="ERROR AL LEER NIVEL";
@@ -234,8 +261,16 @@ void editor_loop(void) {
                 if(key_hit(KEY_DOWN)&&y+1<ED_HEIGHT) { y++; changed=1; }
                 if(key_hit(KEY_L)) { selected=(selected+BRUSH_COUNT-1)%BRUSH_COUNT; changed=1; }
                 if(key_hit(KEY_R)) { selected=(selected+1)%BRUSH_COUNT; changed=1; }
-                if(key_hit(KEY_A)) { ed_put(&editor_level,x,y,brushes[selected]); dirty=1; status="SIN GUARDAR"; changed=1; }
-                if(key_hit(KEY_B)) { ed_put(&editor_level,x,y,ED_EMPTY); dirty=1; status="SIN GUARDAR"; changed=1; }
+                if(key_hit(KEY_A)) {
+                    if(selected<TERRAIN_BRUSH_COUNT) ed_put(&editor_level,x,y,brushes[selected]);
+                    else ed_sprite_put(&editor_level,x,y,selected-TERRAIN_BRUSH_COUNT+1);
+                    dirty=1; status="SIN GUARDAR"; changed=1;
+                }
+                if(key_hit(KEY_B)) {
+                    if(selected<TERRAIN_BRUSH_COUNT) ed_put(&editor_level,x,y,ED_EMPTY);
+                    else ed_sprite_put(&editor_level,x,y,ED_SPR_EMPTY);
+                    dirty=1; status="SIN GUARDAR"; changed=1;
+                }
                 if(key_hit(KEY_START)) {
                     if(active_slot<0 && legacy_copy) {
                         int slot; for(slot=0;slot<ED_SLOT_COUNT;slot++) if(slot_status[slot]==0 && slot_write[slot]) break;
