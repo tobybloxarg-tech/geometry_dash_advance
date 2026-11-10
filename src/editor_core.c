@@ -85,7 +85,11 @@ int ed_bank_read(const uint8_t *bank, EditorLevel *level, uint32_t *sequence) {
     /* EditorLevel is 1024 bytes. Keep the validation scratch out of the
      * limited GBA stack: this function is also called while the editor loop
      * and bank-selection frames are live. It is not called from interrupts. */
+#if defined(__arm__)
+    static EditorLevel temp __attribute__((section(".ewram")));
+#else
     static EditorLevel temp;
+#endif
     for(i=0;i<ED_BANK_BYTES;i++) { if(bank[i]) zero=0; if(bank[i]!=0xff) ff=0; }
     if(zero || ff) return ED_BANK_EMPTY;
     if(memcmp(bank,"GDM3",4)) return ED_BANK_UNKNOWN;
