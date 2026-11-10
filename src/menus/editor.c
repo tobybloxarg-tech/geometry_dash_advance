@@ -1,7 +1,7 @@
 /* Experimental visual metatile editor. Separate, checked SRAM; not a game loader. */
 #include <tonc.h>
 #include <string.h>
-#include <stdio.h>
+#include "posprintf.h"
 #include "main.h"
 #include "level_select.h"
 #include "editor.h"
@@ -66,7 +66,7 @@ static void draw(unsigned x,unsigned y,unsigned left,unsigned top,unsigned selec
         text(0,48,"BORRA EL NIVEL ACTUAL"); text(0,64,"Y CAMBIOS NO GUARDADOS");
         text(0,96,"EL GUARDADO SIGUE IGUAL"); text(0,112,"HASTA PULSAR START"); return;
     }
-    snprintf(line,sizeof line,"EDITOR X%02u Y%u NO JUGABLE",x+1,y+1); text(0,0,line);
+    posprintf(line,"EDITOR X%02d Y%d NO JUGABLE",x+1,y+1); text(0,0,line);
     for(unsigned r=0;r<VIEW_H;r++) for(unsigned c=0;c<VIEW_W;c++)
         metatile_at(c*2,2+r*2,(unsigned)ed_get(&editor_level,left+c,top+r));
     outline((x-left)*2,2+(y-top)*2);
