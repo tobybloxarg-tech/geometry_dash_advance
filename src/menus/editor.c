@@ -1,12 +1,11 @@
 /* Experimental visual metatile editor. Separate, checked SRAM; not a game loader. */
 #include <tonc.h>
 #include <string.h>
-#include "posprintf.h"
+#include <stdio.h>
 #include "main.h"
 #include "level_select.h"
 #include "editor.h"
 #include "editor_core.h"
-#include "metatiles.h"
 #include "tonc_tte.h"
 #include "pusab.h"
 
@@ -66,7 +65,7 @@ static void draw(unsigned x,unsigned y,unsigned left,unsigned top,unsigned selec
         text(0,48,"BORRA EL NIVEL ACTUAL"); text(0,64,"Y CAMBIOS NO GUARDADOS");
         text(0,96,"EL GUARDADO SIGUE IGUAL"); text(0,112,"HASTA PULSAR START"); return;
     }
-    posprintf(line,"EDITOR X%02d Y%d NO JUGABLE",x+1,y+1); text(0,0,line);
+    snprintf(line,sizeof line,"EDITOR X%02u Y%u NO JUGABLE",x+1,y+1); text(0,0,line);
     for(unsigned r=0;r<VIEW_H;r++) for(unsigned c=0;c<VIEW_W;c++)
         metatile_at(c*2,2+r*2,(unsigned)ed_get(&editor_level,left+c,top+r));
     outline((x-left)*2,2+(y-top)*2);
@@ -98,7 +97,16 @@ void editor_loop(void) {
     memset32(palette_buffer,0,256);
     memcpy16(palette_buffer,blockPalette,16);
     memcpy16(&palette_buffer[32],&menu_palette[32],16);
-    palette_buffer[0]=0x5000; palette_buffer[31]=0x7fff;
+    /* The game normally computes these object colors when a level loads.
+     * Raw blockPalette has a black OBJ entry, so without this initialization
+     * the editor renders every block outline and spike almost invisible. */
+    palette_buffer[0]=0x5000;
+    palette_buffer[8]=0x5863; palette_buffer[9]=0x6d4a;
+    palette_buffer[10]=0x7fff; palette_buffer[11]=0x7fff;
+    /* Pusab glyph indices are 1=white, 2=black, 3=gray. The menu's
+     * default bank 2 has index 1 black and 3 white, inverting the glyphs. */
+    palette_buffer[33]=0x7fff; palette_buffer[34]=0x0000;
+    palette_buffer[35]=0x5294;
     memcpy32(pal_bg_mem,palette_buffer,256);
     tte_init_se(2,BG_CBB(0)|BG_SBB(27)|BG_REG_32x32|BG_PRIO(1),0,0,0,&pusabFont,NULL);
     tte_set_special(0x2000);
