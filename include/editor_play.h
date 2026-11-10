@@ -3,9 +3,10 @@
 #include <stdint.h>
 #include "editor_core.h"
 
-/* The 64 editable columns are followed by 10 empty columns: the stock
+/* The editable columns are followed by 10 empty columns: the stock
  * completion cutscene starts 152 pixels before the nominal level end. */
 #define ED_PLAY_WIDTH (ED_WIDTH + 10)
+unsigned ed_play_width(void);
 /* Conservative cap: limits live OAM pressure as well as object slots. */
 #define ED_PLAY_MAX_SPRITES 16
 #define ED_PLAY_RECORD_WORDS 5

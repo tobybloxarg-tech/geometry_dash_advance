@@ -2,10 +2,12 @@
 #define GDA_EDITOR_CORE_H
 #include <stddef.h>
 #include <stdint.h>
-#define ED_WIDTH 64
+#define ED_WIDTH 1024
+#define ED_OLD_WIDTH 64
+#define ED_OLD_CELLS (ED_OLD_WIDTH * ED_HEIGHT)
 #define ED_HEIGHT 8
 #define ED_CELLS (ED_WIDTH * ED_HEIGHT)
-#define ED_SAVE_BYTES (8 + ED_CELLS + 4)
+#define ED_SAVE_BYTES (8 + ED_OLD_CELLS + 4)
 /* Stable editor symbols, not the engine's actual metatile IDs. */
 enum { ED_EMPTY, ED_BLOCK, ED_SPIKE, ED_DARK, ED_CHECK, ED_SLAB_UP,
        ED_SLAB_DOWN, ED_SLAB_LEFT, ED_SLAB_RIGHT, ED_SPIKE_DOWN,
@@ -42,7 +44,7 @@ enum { ED_SPEED_X05, ED_SPEED_X1, ED_SPEED_X2, ED_SPEED_X3, ED_SPEED_X4, ED_SPEE
 enum { ED_SONG_LIST(ED_SONG_ENUM) ED_SONG_COUNT };
 #undef ED_SONG_ENUM
 typedef struct { uint8_t mode, speed, mini, song; } EditorSettings;
-typedef struct { uint8_t cells[ED_CELLS]; uint8_t sprites[ED_CELLS]; EditorSettings settings; } EditorLevel;
+typedef struct { uint8_t cells[ED_CELLS]; uint8_t sprites[ED_CELLS]; EditorSettings settings; uint16_t width; } EditorLevel;
 /* v5 has room for 128 sparse sprites, maximum kind 31. v4 is retained for
  * default settings and 4-bit sprites, including dense old levels. */
 #define ED_V5_MAX_SPRITES 128
