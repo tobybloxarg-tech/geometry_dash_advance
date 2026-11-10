@@ -82,7 +82,10 @@ int ed_decode(EditorLevel *level, const uint8_t in[ED_SAVE_BYTES]) {
 int ed_bank_read(const uint8_t *bank, EditorLevel *level, uint32_t *sequence) {
     unsigned i; int zero=1, ff=1;
     uint32_t stored=0, seq=0;
-    EditorLevel temp;
+    /* EditorLevel is 1024 bytes. Keep the validation scratch out of the
+     * limited GBA stack: this function is also called while the editor loop
+     * and bank-selection frames are live. It is not called from interrupts. */
+    static EditorLevel temp;
     for(i=0;i<ED_BANK_BYTES;i++) { if(bank[i]) zero=0; if(bank[i]!=0xff) ff=0; }
     if(zero || ff) return ED_BANK_EMPTY;
     if(memcmp(bank,"GDM3",4)) return ED_BANK_UNKNOWN;
