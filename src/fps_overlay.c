@@ -36,10 +36,10 @@ void fps_draw(void) {
     fps=fps_read();
     /* Small, fixed top-left HUD, away from the centred percentage. Reserve no
      * OAM slots before gameplay objects: the HUD is dropped if OAM is full. */
-    oam_metaspr(0,8,fps_label,0,0,1023,-1,PRIORITY_DONT_DISABLE_0,0,1,1);
+    oam_metaspr(8,8,fps_label,0,0,1023,-1,PRIORITY_DONT_DISABLE_0,0,1,1);
     if (fps>=0) {
         /* Always reserve two digit cells, even for a one-digit sample. */
-        oam_metaspr(16,8,numberSpr,0,0,FIRST_NUMBER_ID+(unsigned)fps/10,-1,PRIORITY_DONT_DISABLE_0,0,1,1);
-        oam_metaspr(24,8,numberSpr,0,0,FIRST_NUMBER_ID+(unsigned)fps%10,-1,PRIORITY_DONT_DISABLE_0,0,1,1);
+        oam_metaspr(24,8,numberSpr,0,0,FIRST_NUMBER_ID+(unsigned)fps/10,-1,PRIORITY_DONT_DISABLE_0,0,1,1);
+        oam_metaspr(32,8,numberSpr,0,0,FIRST_NUMBER_ID+(unsigned)fps%10,-1,PRIORITY_DONT_DISABLE_0,0,1,1);
     }
 }

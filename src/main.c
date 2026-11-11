@@ -442,11 +442,11 @@ void level_loop() {
             return;
         }
         if (player_death) {
-            fps_stop();
+            /* Keep the sample window alive across retries; otherwise short
+             * attempts repeatedly clear the counter before it can publish. */
             mmEffect(SFX_EXPLOSION);
             set_new_best(get_level_progress(), in_practice_mode);
             reset_level();
-            fps_start();
         }
 
         // Run player code
