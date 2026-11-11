@@ -13,6 +13,7 @@
 #include "editor.h"
 #include "editor_play.h"
 #include "editor_trace.h"
+#include "fan_levels.h"
 #include "physics_defines.h"
 #include "math.h"
 
@@ -266,6 +267,10 @@ void main_loop() {
                 editor_loop();
                 break;
 
+            case STATE_FAN_MENU:
+                fan_menu_loop();
+                break;
+
             case STATE_PLAYING:
                 game_loop();
                 break;
@@ -339,6 +344,7 @@ void level_loop() {
                 mmStop();
                 mmEffect(SFX_LEVEL_EXIT);
                 game_state = ed_play_active() ? STATE_EDITOR : STATE_LEVEL_SELECT;
+                if (fan_play_active()) game_state = STATE_FAN_MENU;
                 memcpy32(palette_buffer, pal_bg_mem, 256);
                 clear_checkpoints();
                 in_practice_mode = FALSE;
@@ -346,6 +352,7 @@ void level_loop() {
 
                 fade_out();
                 editor_play_finish();
+                fan_play_set_active(0);
 
                 mmStart(MOD_MENU, MM_PLAY_LOOP);
                 return;
@@ -354,11 +361,13 @@ void level_loop() {
 
         if (cutscene_frame == EXIT_CUTSCENE_FRAME) {
             game_state = ed_play_active() ? STATE_EDITOR : STATE_LEVEL_SELECT;
+            if (fan_play_active()) game_state = STATE_FAN_MENU;
             memcpy32(palette_buffer, pal_bg_mem, 256);
             fade_out();
             mmStart(MOD_MENU, MM_PLAY_LOOP);
             clear_checkpoints();
             editor_play_finish();
+            fan_play_set_active(0);
             complete_cutscene = FALSE;        
             cutscene_frame = 0;
             screen_mirrored = FALSE;
@@ -399,7 +408,7 @@ void level_loop() {
 #endif
         
 
-        if (player_death && ed_play_active()) {
+        if (player_death && ed_play_active() && !fan_play_active()) {
             /* Keep the just-completed attempt visible in the same editor. */
             mmStop();
             game_state = STATE_EDITOR;
@@ -419,7 +428,7 @@ void level_loop() {
         }
 
         // Run player code
-        int trace_this_frame = ed_play_active() && !complete_cutscene;
+        int trace_this_frame = ed_play_active() && !fan_play_active() && !complete_cutscene;
         player_code();
         if (trace_this_frame) {
             /* Sample player centre in world pixels, after actual physics. */
@@ -447,7 +456,7 @@ void level_loop() {
             draw_checkpoints();
         }
 
-        editor_trace_draw_play();
+        if (!fan_play_active()) editor_trace_draw_play();
         // Sort OAM
         sort_oam_by_prio();
 
