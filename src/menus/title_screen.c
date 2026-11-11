@@ -23,11 +23,11 @@ void reset_title_screen_player();
 void draw_button_glyphs_title_screen();
 
 /* BG0 and BG1 title maps use tiles at most 489; the original copies
- * populate 0-127 and 256-511. Custom labels live at 768-803 (VRAM 0x6000),
+ * populate 0-127 and 256-511. Custom labels and the options button live at 768-823 (VRAM 0x6000),
  * ahead of the three screenblocks at 0xD000, 0xD800, and 0xE000.
  * Access as character block 1 + 256, not tile_mem[0][768]: Tonc's
  * character-block subarray only has 512 TILEs, even though VRAM is linear.
- * BG0 uses CBB 0, so its screen entries still address them as 768-803.
+ * BG0 uses CBB 0, so its screen entries still address them as 768-823.
  * Palette bank 4 is unused by all three title backgrounds and is not touched
  * by menu_set_bg_color or the player palette updates. */
 #define CREATE_BUTTON_PAL 4
@@ -73,10 +73,56 @@ static void draw_title_label(const char *label, unsigned text_tiles, unsigned ti
     se_mem[26][32 + col + WIDTH_TILES - 1] = (CREATE_BUTTON_PAL << 12) | (tile_base + RIGHT_TILE);
 }
 
+/* Reuse the exact 32x32 frame of the title's L/icon-kit button. Replace
+ * only its yellow face with a small gear in the same bank-1 palette; it is
+ * BG0, not a sprite, so it consumes no OAM and does not animate or scroll.
+ * The map begins at col 26: BG0HOFS=8 makes its screen x=200. */
+static void draw_options_button(void) {
+    static const u16 frame[16] = {
+        0x136,0x137,0x138,0x139, 0x146,0x147,0x148,0x149,
+        0x156,0x157,0x158,0x159, 0x166,0x167,0x168,0x169
+    };
+    /* 1 black, b white, c yellow, d ochre. Dot keeps original face. */
+    static const char gear[16][17] = {
+        ".....111111.....", ".11111bbbb11111.", ".1bbb1bbbb1bbb1.", ".1bbb1bbbb1bbb1.",
+        ".1cccccccccccc1.", "1111cccccccc1111", "1ccccc1111ccccc1", "1ccccc1111ccccc1",
+        "1ddddd1111ddddd1", "1ddddd1111ddddd1", "1111dddddddd1111", ".1dddddddddddd1.",
+        ".1ddd1dddd1ddd1.", ".1ddd1dddd1ddd1.", ".11111dddd11111.", ".....111111....."
+    };
+    TILE *tiles = &tile_mem[1][804-512];
+    unsigned x, y, i;
+    for (i=0; i<16; i++) {
+        /* title_screen_chr begins at BG tile 256. */
+        for (y=0; y<8; y++) tiles[i].data[y] = title_screen_chr[frame[i]-256].data[y];
+        se_mem[26][(8+i/4)*32+26+i%4] = (1<<12) | (804+i);
+    }
+    for (y=0; y<16; y++) for (x=0; x<16; x++) {
+        char ch = gear[y][x];
+        if (ch != '.') {
+            unsigned px=x+8, py=y+8, tile=(py/8)*4+px/8, shift=(px%8)*4;
+            u32 color = ch=='1' ? 1 : ch=='b' ? 11 : ch=='c' ? 12 : 13;
+            tiles[tile].data[py%8] = (tiles[tile].data[py%8] & ~(15u<<shift)) | (color<<shift);
+        }
+    }
+    /* DOWN uses Pusab's existing font, with the same opaque palette as the
+     * upper control labels. Four cells fit exactly underneath the button. */
+    for (i=0; i<4; i++) {
+        for (y=0; y<8; y++) {
+            u32 source=pusabGlyphs[(unsigned char)"DOWN"[i]*8+y], out=0;
+            for (x=0; x<8; x++) {
+                u32 color=(source>>(x*4))&15;
+                out |= (color ? color : 4)<<(x*4);
+            }
+            tiles[16+i].data[y]=out;
+        }
+        se_mem[26][12*32+26+i] = (CREATE_BUTTON_PAL<<12) | (820+i);
+    }
+}
+
 static void draw_create_button(void) {
     draw_title_label("B: CREAR", 8, 768, 12);
     draw_title_label("UP: FAN 2", 9, 780, 1);
-    draw_title_label("D:OP", 4, 793, 23);
+    draw_options_button();
 }
 
 extern u16 __key_curr;
