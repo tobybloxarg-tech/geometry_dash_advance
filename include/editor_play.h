@@ -36,4 +36,9 @@ uint16_t ed_play_metatile(unsigned layer, unsigned x, unsigned y);
 /* Runtime entry/exit, called only by the GBA game and editor UI. */
 int editor_play_start(const EditorLevel *level);
 void editor_play_finish(void);
+/* Transient test controls; never serialized. */
+int editor_test_invincible(void);
+void editor_test_set_invincible(int enabled);
+void editor_trace_graphics_init(void);
+void editor_trace_draw_play(void);
 #endif

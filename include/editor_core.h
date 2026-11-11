@@ -53,7 +53,7 @@ int ed_can_encode(const EditorLevel *level);
 int ed_sprite_put(EditorLevel *level, unsigned x, unsigned y, unsigned kind);
 int ed_sprite_get(const EditorLevel *level, unsigned x, unsigned y);
 /* UI state machine uses abstract button bits so it can be tested off-GBA. */
-enum { ED_SCREEN_EDIT, ED_SCREEN_MENU, ED_SCREEN_CONFIRM_NEW, ED_SCREEN_SETTINGS };
+enum { ED_SCREEN_EDIT, ED_SCREEN_MENU, ED_SCREEN_CONFIRM_NEW, ED_SCREEN_SETTINGS, ED_SCREEN_TRANSFER };
 enum { ED_INPUT_SELECT = 1, ED_INPUT_A = 2, ED_INPUT_B = 4, ED_INPUT_START = 8 };
 enum { ED_ACTION_NONE, ED_ACTION_NEW, ED_ACTION_EXIT };
 int ed_menu_input(int *screen, unsigned input);
@@ -70,6 +70,16 @@ int ed_put(EditorLevel *level, unsigned x, unsigned y, unsigned kind);
 int ed_get(const EditorLevel *level, unsigned x, unsigned y);
 int ed_encode(const EditorLevel *level, uint8_t out[ED_SAVE_BYTES]);
 int ed_decode(EditorLevel *level, const uint8_t in[ED_SAVE_BYTES]);
+/* Select a rectangle in ONE independent layer. Only non-empty cells are
+ * transferred; empty cells never erase the destination. Same-layer occupied
+ * destinations are refused, except the source footprint during a move. */
+enum { ED_LAYER_TERRAIN, ED_LAYER_SPRITE };
+enum { ED_TRANSFER_OK, ED_TRANSFER_INVALID, ED_TRANSFER_EMPTY,
+       ED_TRANSFER_OCCUPIED, ED_TRANSFER_CAPACITY, ED_TRANSFER_SAME };
+int ed_transfer(EditorLevel *level, unsigned layer, unsigned sx, unsigned sy,
+                unsigned width, unsigned height, unsigned dx, unsigned dy,
+                int copy);
+
 /* Two independently checked banks per slot, within the 32 KiB SRAM window. */
 #define ED_SLOT_COUNT 6
 #define ED_BANK_BYTES (8 + ED_SAVE_BYTES + 4)
