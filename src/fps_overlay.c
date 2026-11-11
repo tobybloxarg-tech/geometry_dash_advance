@@ -10,7 +10,7 @@ static const u16 fps_label[] = {
     ATTR2_PALBANK(5), 0, 0, 0, 0, 0xffff
 };
 void fps_graphics_init(void) {
-    static const u8 rows[8] = {0, 0xf7, 0x15, 0xf7, 0x91, 0xf1, 0, 0};
+    static const u8 rows[8] = {0, 0xdb, 0x59, 0xdb, 0x89, 0xc9, 0, 0};
     unsigned y,x;
     /* Do not modify the baseline 1023 tile when the overlay is disabled. */
     if (!option_show_fps) return;
