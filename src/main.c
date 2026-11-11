@@ -14,6 +14,7 @@
 #include "editor_play.h"
 #include "editor_trace.h"
 #include "fan_levels.h"
+#include "game_options.h"
 #include "physics_defines.h"
 #include "math.h"
 
@@ -23,6 +24,11 @@ u32 paused_routines();
 
 void vblank_handler() {
     mmVBlank();
+
+    /* Sample every gameplay VBlank, including repeated frames; only an OAM
+     * transfer for a finished frame counts as a fresh presentation. */
+    if (game_state == STATE_PLAYING && option_show_fps)
+        fps_vblank(frame_finished && (update_flags & UPDATE_OAM));
 
     // Only use the update handler on a level
     if (game_state == STATE_PLAYING && frame_finished) {
@@ -271,6 +277,10 @@ void main_loop() {
                 fan_menu_loop();
                 break;
 
+            case STATE_OPTIONS:
+                options_menu_loop();
+                break;
+
             case STATE_PLAYING:
                 game_loop();
                 break;
@@ -298,6 +308,11 @@ void game_loop() {
     REG_BG3HOFS = 0;
     REG_BG3VOFS = 256;
 
+    /* The editor and fan menus disable blending. Restore the stock setting
+     * for every level, not only editor test play. */
+    REG_BLDCNT = BLD_BUILD(BLD_OBJ, BLD_BG0 | BLD_BG1 | BLD_BG2, BLD_MODE(1));
+    REG_BLDALPHA = BLDA_BUILD(16, 16);
+
     // Set window registers
 
     REG_WININ = WIN_BG0 | WIN_BG1 | WIN_BG2 | WIN_BG3 | WIN_BLD | WIN_OBJ;
@@ -322,13 +337,16 @@ void game_loop() {
 
     load_level(loaded_level_id);
     editor_trace_graphics_init();
+    fps_graphics_init();
     
     attempt_count = 1;
 
     frame_finished = TRUE;
     fade_in_level();
 
+    fps_start();
     level_loop();
+    fps_stop();
 }
 
 void level_loop() {
@@ -340,6 +358,7 @@ void level_loop() {
 
         // If pressed start, pause the game
         if (key_hit(KEY_START) && !complete_cutscene) {
+            fps_stop();
             if (paused_routines()) {
                 mmStop();
                 mmEffect(SFX_LEVEL_EXIT);
@@ -357,6 +376,7 @@ void level_loop() {
                 mmStart(MOD_MENU, MM_PLAY_LOOP);
                 return;
             }
+            fps_start();
         }
 
         if (cutscene_frame == EXIT_CUTSCENE_FRAME) {
@@ -422,9 +442,11 @@ void level_loop() {
             return;
         }
         if (player_death) {
+            fps_stop();
             mmEffect(SFX_EXPLOSION);
             set_new_best(get_level_progress(), in_practice_mode);
             reset_level();
+            fps_start();
         }
 
         // Run player code
@@ -457,6 +479,7 @@ void level_loop() {
         }
 
         if (!fan_play_active()) editor_trace_draw_play();
+        fps_draw();
         // Sort OAM
         sort_oam_by_prio();
 

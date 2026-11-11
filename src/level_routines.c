@@ -1,3 +1,4 @@
+#include "game_options.h"
 #include <string.h>
 #include "level_routines.h"
 #include "memory.h"
@@ -2475,6 +2476,8 @@ ARM_CODE void load_camera_screen() {
 }
 
 void spawn_use_effect(s32 x, s32 y, s32 type, s32 palette) {
+    /* Activation rings are cosmetic; do not suppress the death effect. */
+    if (option_low_graphics && game_state == STATE_PLAYING && type != USE_EFFECT_PLAYER_DEATH) return;
     for (s32 slot = 0; slot < AFF_SLOT_USE_EFFECT_COUNT; slot++) {
         struct UseEffectSlot *curr_slot = &use_effect_buffer[slot];
 

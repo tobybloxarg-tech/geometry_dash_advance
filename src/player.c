@@ -6,6 +6,7 @@
 #include "level_select.h"
 #include "math.h"
 #include "editor_play.h"
+#include "game_options.h"
 
 // in subpixels
 const u32 speed_constants[] = {
@@ -722,7 +723,9 @@ void draw_player() {
                 set_trail_point();
             }
 
-            handle_trail();
+            /* Still update trail state; only omit decorative normal trail OAM.
+             * Wave trail remains visible and its housekeeping remains intact. */
+            if (!option_low_graphics || game_state != STATE_PLAYING) handle_trail();
             wave_trail_pointer[curr_player_id] = 0;
         } else if (!complete_cutscene) {
             // Else, if it's a wave and the complete cutscene is not playing, draw the wave trail and set main trail to 0
