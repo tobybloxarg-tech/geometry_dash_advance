@@ -29,6 +29,7 @@ static int slot_status[ED_SLOT_COUNT], slot_write[ED_SLOT_COUNT];
 static int legacy_valid, legacy_unknown;
 static int active_slot=-1, screen_list, screen_detail, list_cursor, detail_cursor;
 static int dirty, legacy_copy, settings_cursor;
+static EditorTestConfirm test_confirm;
 /* Kept while gameplay owns a separate level snapshot. */
 static int resume_editor, trace_for_editor, test_noclip;
 static unsigned resume_x,resume_y,resume_left,resume_top,resume_selected;
@@ -177,6 +178,16 @@ static void draw(unsigned x,unsigned y,unsigned left,unsigned top,unsigned selec
         if(settings_cursor==4 && editor_level.width<ED_WIDTH) text(0,144,"DER AMPLIAR  B VOLVER");
         else text(0,144,"B VOLVER  INVENCIBLE SOLO TEST");
         text(0,152,status); return;
+    }
+    if(screen==ED_SCREEN_CONFIRM_TEST) {
+        text(0,0,"TESTEAR NIVEL");
+        text(0,24,"PROBAR SIN GUARDAR");
+        text(0,48,test_confirm.yes?"X SI":"  SI");
+        text(0,64,test_confirm.yes?"  NO":"X NO");
+        text(0,96,"ARR/ABA ELEGIR");
+        text(0,112,"A CONFIRMAR B VOLVER");
+        text(0,136,test_noclip?"INVENCIBLE SI":"INVENCIBLE NO");
+        return;
     }
     if(screen==ED_SCREEN_TRANSFER)
         posprintf(line,"%s X%d/%d Y%d",transfer_copy?"COPIAR":"MOVER",x+1,editor_level.width,y+1);
@@ -370,14 +381,8 @@ void editor_loop(void) {
                 if(key_hit(KEY_DOWN)) { settings_cursor=(settings_cursor+1)%7; changed=1; }
                 int delta=key_hit(KEY_LEFT)?-1:key_hit(KEY_RIGHT)?1:0;
                 if(settings_cursor==6 && key_hit(KEY_A) && !buttons.blocked) {
-                    editor_test_set_invincible(test_noclip);
-                    if(!ed_play_configure(editor_level.settings.mode, editor_level.settings.speed,
-                                          editor_level.settings.mini, editor_level.settings.song)) status="AJUSTES INVALIDOS";
-                    else if(editor_play_start(&editor_level)) {
-                        resume_x=x; resume_y=y; resume_left=left; resume_top=top; resume_selected=selected;
-                        resume_editor=1; trace_for_editor=1; return;
-                    } else status=ed_play_error()==ED_PLAY_TOO_MANY ? "MAXIMO 16 OBJETOS" : "NIVEL INVALIDO";
-                    changed=1;
+                    ed_test_confirm_open(&test_confirm);
+                    screen=ED_SCREEN_CONFIRM_TEST; status=""; changed=1;
                 }
                 if(delta && settings_cursor==5) { test_noclip^=1; status="SOLO PARA TEST"; changed=1; }
                 else if(delta && settings_cursor<5) {
@@ -392,6 +397,23 @@ void editor_loop(void) {
                     else if(settings_cursor!=4 || editor_level.width!=width_before) { dirty=1; status="SIN GUARDAR"; }
                     changed=1;
                 }
+            }
+        } else if(screen==ED_SCREEN_CONFIRM_TEST) {
+            unsigned direction=(key_hit(KEY_UP)?ED_INPUT_UP:0)|(key_hit(KEY_DOWN)?ED_INPUT_DOWN:0)|
+                               (key_hit(KEY_LEFT)?ED_INPUT_LEFT:0)|(key_hit(KEY_RIGHT)?ED_INPUT_RIGHT:0);
+            unsigned old_yes=test_confirm.yes;
+            int action=ed_test_confirm_step(&test_confirm,down,hit|direction);
+            if(old_yes!=test_confirm.yes) changed=1;
+            if(action==ED_TEST_CANCEL) { screen=ED_SCREEN_SETTINGS; status=""; changed=1; }
+            else if(action==ED_TEST_START) {
+                editor_test_set_invincible(test_noclip);
+                if(!ed_play_configure(editor_level.settings.mode, editor_level.settings.speed,
+                                      editor_level.settings.mini, editor_level.settings.song)) status="AJUSTES INVALIDOS";
+                else if(editor_play_start(&editor_level)) {
+                    resume_x=x; resume_y=y; resume_left=left; resume_top=top; resume_selected=selected;
+                    resume_editor=1; trace_for_editor=1; return;
+                } else status=ed_play_error()==ED_PLAY_TOO_MANY ? "MAXIMO 16 OBJETOS" : "NIVEL INVALIDO";
+                screen=ED_SCREEN_SETTINGS; changed=1;
             }
         } else if(screen==ED_SCREEN_MENU) {
             if(key_hit(KEY_B)) { screen=ED_SCREEN_EDIT; changed=1; }
