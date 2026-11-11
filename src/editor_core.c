@@ -69,6 +69,21 @@ unsigned ed_edit_buttons_step(EditorButtons *s, unsigned down, unsigned hit,
     }
     return out;
 }
+void ed_test_confirm_open(EditorTestConfirm *s) {
+    s->yes = 0; s->armed = 0;
+}
+int ed_test_confirm_step(EditorTestConfirm *s, unsigned down, unsigned hit) {
+    if (!s->armed) {
+        if (!(down & (ED_INPUT_A | ED_INPUT_B))) s->armed = 1;
+        return ED_TEST_WAIT;
+    }
+    /* B always wins over A; ignore navigation on an action frame. */
+    if (hit & ED_INPUT_B) return ED_TEST_CANCEL;
+    if (hit & ED_INPUT_A) return (down & ED_INPUT_B) || !s->yes ? ED_TEST_CANCEL : ED_TEST_START;
+    if (hit & (ED_INPUT_UP | ED_INPUT_LEFT)) s->yes = 1;
+    else if (hit & (ED_INPUT_DOWN | ED_INPUT_RIGHT)) s->yes = 0;
+    return ED_TEST_WAIT;
+}
 void ed_clear(EditorLevel *level) {
     memset(level, 0, sizeof(*level));
     level->settings.speed = ED_SPEED_X1;
