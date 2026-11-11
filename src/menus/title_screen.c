@@ -76,7 +76,7 @@ static void draw_title_label(const char *label, unsigned text_tiles, unsigned ti
 static void draw_create_button(void) {
     draw_title_label("B: CREAR", 8, 768, 12);
     draw_title_label("UP: FAN 2", 9, 780, 1);
-    draw_title_label("DOWN:OP", 7, 793, 22);
+    draw_title_label("D:OP", 4, 793, 23);
 }
 
 extern u16 __key_curr;
