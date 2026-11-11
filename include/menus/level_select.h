@@ -14,7 +14,8 @@ enum GameState {
     STATE_SOUND_TEST,
     STATE_PLAYING,
     STATE_EDITOR,
-    STATE_FAN_MENU
+    STATE_FAN_MENU,
+    STATE_OPTIONS
 };
 
 enum DifficultyEnum {
