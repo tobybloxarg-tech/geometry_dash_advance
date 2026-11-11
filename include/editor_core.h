@@ -53,8 +53,9 @@ int ed_can_encode(const EditorLevel *level);
 int ed_sprite_put(EditorLevel *level, unsigned x, unsigned y, unsigned kind);
 int ed_sprite_get(const EditorLevel *level, unsigned x, unsigned y);
 /* UI state machine uses abstract button bits so it can be tested off-GBA. */
-enum { ED_SCREEN_EDIT, ED_SCREEN_MENU, ED_SCREEN_CONFIRM_NEW, ED_SCREEN_SETTINGS, ED_SCREEN_TRANSFER };
-enum { ED_INPUT_SELECT = 1, ED_INPUT_A = 2, ED_INPUT_B = 4, ED_INPUT_START = 8 };
+enum { ED_SCREEN_EDIT, ED_SCREEN_MENU, ED_SCREEN_CONFIRM_NEW, ED_SCREEN_SETTINGS, ED_SCREEN_TRANSFER, ED_SCREEN_CONFIRM_TEST };
+enum { ED_INPUT_SELECT = 1, ED_INPUT_A = 2, ED_INPUT_B = 4, ED_INPUT_START = 8,
+       ED_INPUT_UP = 32, ED_INPUT_DOWN = 64, ED_INPUT_LEFT = 128, ED_INPUT_RIGHT = 256 };
 enum { ED_ACTION_NONE, ED_ACTION_NEW, ED_ACTION_EXIT };
 int ed_menu_input(int *screen, unsigned input);
 /* Grid A/B gestures. Bits in down/hit are ED_INPUT_A and ED_INPUT_B.
@@ -65,6 +66,11 @@ enum { ED_BUTTON_CHORD = 16 };
 typedef struct { unsigned pending, age, blocked; } EditorButtons;
 unsigned ed_edit_buttons_step(EditorButtons *state, unsigned down, unsigned hit,
                               int in_grid, int flush);
+/* Test confirmation is armed only after both A and B have been released. */
+typedef struct { unsigned yes, armed; } EditorTestConfirm;
+enum { ED_TEST_WAIT, ED_TEST_CANCEL, ED_TEST_START };
+void ed_test_confirm_open(EditorTestConfirm *state);
+int ed_test_confirm_step(EditorTestConfirm *state, unsigned down, unsigned hit);
 void ed_clear(EditorLevel *level);
 int ed_put(EditorLevel *level, unsigned x, unsigned y, unsigned kind);
 int ed_get(const EditorLevel *level, unsigned x, unsigned y);
