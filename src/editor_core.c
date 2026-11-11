@@ -263,6 +263,48 @@ int ed_decode(EditorLevel *level, const uint8_t in[ED_SAVE_BYTES]) {
     return 1;
 }
 
+/* Single-threaded editor-only scratch; never put a 16 KiB level on the GBA
+ * stack. Apply to a copy, including overlapping moves, then commit atomically. */
+int ed_transfer(EditorLevel *level, unsigned layer, unsigned sx, unsigned sy,
+                unsigned w, unsigned h, unsigned dx, unsigned dy, int copy) {
+#if defined(__arm__)
+    static EditorLevel temp __attribute__((section(".ewram")));
+#else
+    static EditorLevel temp;
+#endif
+    unsigned x,y,any=0;
+    const uint8_t *src;
+    uint8_t *out;
+    if(!level || layer>ED_LAYER_SPRITE || (copy!=0 && copy!=1) ||
+       !w || !h || level->width>ED_WIDTH || level->width<ED_OLD_WIDTH ||
+       sx>=level->width || dx>=level->width || sy>=ED_HEIGHT || dy>=ED_HEIGHT ||
+       w>level->width-sx || w>level->width-dx || h>ED_HEIGHT-sy || h>ED_HEIGHT-dy)
+        return ED_TRANSFER_INVALID;
+    if(!ed_can_encode(level)) return ED_TRANSFER_INVALID;
+    src=layer==ED_LAYER_TERRAIN ? level->cells : level->sprites;
+    for(y=0;y<h;y++) for(x=0;x<w;x++) {
+        unsigned si=(sy+y)*ED_WIDTH+sx+x, tx=dx+x, ty=dy+y;
+        if(!src[si]) continue;
+        any=1;
+        if(src[ty*ED_WIDTH+tx] &&
+           (copy || tx<sx || tx>=sx+w || ty<sy || ty>=sy+h))
+            return ED_TRANSFER_OCCUPIED;
+    }
+    if(!any) return ED_TRANSFER_EMPTY;
+    if(!copy && sx==dx && sy==dy) return ED_TRANSFER_SAME;
+    temp=*level;
+    out=layer==ED_LAYER_TERRAIN ? temp.cells : temp.sprites;
+    if(!copy) for(y=0;y<h;y++) for(x=0;x<w;x++)
+        out[(sy+y)*ED_WIDTH+sx+x]=0;
+    for(y=0;y<h;y++) for(x=0;x<w;x++) {
+        unsigned si=(sy+y)*ED_WIDTH+sx+x;
+        if(src[si]) out[(dy+y)*ED_WIDTH+dx+x]=src[si];
+    }
+    if(!ed_can_encode(&temp)) return ED_TRANSFER_CAPACITY;
+    *level=temp;
+    return ED_TRANSFER_OK;
+}
+
 int ed_bank_read(const uint8_t *bank, EditorLevel *level, uint32_t *sequence) {
     unsigned i; int zero=1, ff=1;
     uint32_t stored=0, seq=0;

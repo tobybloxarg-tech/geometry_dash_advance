@@ -5,6 +5,7 @@
 #include "soundbank.h"
 #include "level_select.h"
 #include "math.h"
+#include "editor_play.h"
 
 // in subpixels
 const u32 speed_constants[] = {
@@ -49,6 +50,7 @@ void update_falling();
 FIXED mirror_scaling;
 
 void player_main() {    
+    const int test_invincible = editor_test_invincible();
     // Halve steps if dual
     num_steps = (dual == DUAL_ON) ? NUM_DUAL_STEPS : NUM_STEPS;
     
@@ -71,7 +73,12 @@ void player_main() {
             curr_player.player_internal_hitbox_height = 1;
         }
         
-        if (curr_player.player_y < -0x200000) player_death = TRUE;
+        if (curr_player.player_y < -0x200000) {
+            if (test_invincible) {
+                curr_player.player_y = -0x200000;
+                if (curr_player.player_y_speed < 0) curr_player.player_y_speed = 0;
+            } else player_death = TRUE;
+        }
 
         if (key_is_down(KEY_A | KEY_UP)) {
             if (curr_player.player_buffering == NO_ORB_BUFFER) {
@@ -126,6 +133,7 @@ void player_main() {
                     break;
             }
 
+            if (test_invincible) player_death = FALSE;
             if (player_death) break;
         }
 

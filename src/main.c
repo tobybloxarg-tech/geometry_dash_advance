@@ -12,6 +12,8 @@
 #include "icon_kit.h"
 #include "editor.h"
 #include "editor_play.h"
+#include "editor_trace.h"
+#include "physics_defines.h"
 #include "math.h"
 
 void game_loop();
@@ -314,6 +316,7 @@ void game_loop() {
     copy_pulsing_sprite();
 
     load_level(loaded_level_id);
+    editor_trace_graphics_init();
     
     attempt_count = 1;
 
@@ -396,6 +399,19 @@ void level_loop() {
 #endif
         
 
+        if (player_death && ed_play_active()) {
+            /* Keep the just-completed attempt visible in the same editor. */
+            mmStop();
+            game_state = STATE_EDITOR;
+            memcpy32(palette_buffer, pal_bg_mem, 256);
+            clear_checkpoints();
+            in_practice_mode = FALSE;
+            screen_mirrored = screen_mirrored_transition = FALSE;
+            fade_out();
+            editor_play_finish();
+            mmStart(MOD_MENU, MM_PLAY_LOOP);
+            return;
+        }
         if (player_death) {
             mmEffect(SFX_EXPLOSION);
             set_new_best(get_level_progress(), in_practice_mode);
@@ -403,7 +419,14 @@ void level_loop() {
         }
 
         // Run player code
+        int trace_this_frame = ed_play_active() && !complete_cutscene;
         player_code();
+        if (trace_this_frame) {
+            /* Sample player centre in world pixels, after actual physics. */
+            ed_trace_sample((s32)(player_1.player_x >> SUBPIXEL_BITS) + 8,
+                            (s32)(player_1.player_y >> SUBPIXEL_BITS) + 8,
+                            ed_play_width() - 10);
+        }
 
         // Run object routines
         load_objects(TRUE, FALSE);
@@ -424,6 +447,7 @@ void level_loop() {
             draw_checkpoints();
         }
 
+        editor_trace_draw_play();
         // Sort OAM
         sort_oam_by_prio();
 
