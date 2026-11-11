@@ -23,11 +23,11 @@ void reset_title_screen_player();
 void draw_button_glyphs_title_screen();
 
 /* BG0 and BG1 title maps use tiles at most 489; the original copies
- * populate 0-127 and 256-511. Custom labels live at 768-792 (VRAM 0x6000),
+ * populate 0-127 and 256-511. Custom labels live at 768-803 (VRAM 0x6000),
  * ahead of the three screenblocks at 0xD000, 0xD800, and 0xE000.
  * Access as character block 1 + 256, not tile_mem[0][768]: Tonc's
  * character-block subarray only has 512 TILEs, even though VRAM is linear.
- * BG0 uses CBB 0, so its screen entries still address them as 768-792.
+ * BG0 uses CBB 0, so its screen entries still address them as 768-803.
  * Palette bank 4 is unused by all three title backgrounds and is not touched
  * by menu_set_bg_color or the player palette updates. */
 #define CREATE_BUTTON_PAL 4
@@ -76,6 +76,7 @@ static void draw_title_label(const char *label, unsigned text_tiles, unsigned ti
 static void draw_create_button(void) {
     draw_title_label("B: CREAR", 8, 768, 12);
     draw_title_label("UP: FAN 2", 9, 780, 1);
+    draw_title_label("DOWN:OP", 7, 793, 22);
 }
 
 extern u16 __key_curr;
@@ -162,6 +163,7 @@ void title_screen_loop() {
         obj_aff_copy(obj_aff_mem, obj_aff_buffer, 32);
 
         if (key_hit(KEY_UP)) { game_state = STATE_FAN_MENU; break; }
+        if (key_hit(KEY_DOWN)) { game_state = STATE_OPTIONS; break; }
 
         // B opens the prototype editor; the other title actions remain unchanged.
         if (key_hit(KEY_B)) {
